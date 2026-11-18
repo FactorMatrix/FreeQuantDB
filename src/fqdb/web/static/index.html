@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>FreeQuantDB · 数据工作台</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script type="module" src="/static/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <a class="brand-lockup" href="#/overview"
+          ><span class="brand-mark">FQ</span><strong>FreeQuantDB</strong></a
+        >
+        <nav aria-label="主导航">
+          <a href="#/overview" data-page="overview"
+            ><span class="nav-symbol">◫</span>概览</a
+          >
+          <a href="#/datasets" data-page="datasets"
+            ><span class="nav-symbol">▤</span>数据集</a
+          >
+          <a href="#/downloads" data-page="downloads"
+            ><span class="nav-symbol">↓</span>下载<span
+              id="nav-task-count"
+              class="nav-count"
+              hidden
+            ></span
+          ></a>
+          <a href="#/validation" data-page="validation"
+            ><span class="nav-symbol">✓</span>质量</a
+          >
+          <a href="#/provider" data-page="provider"
+            ><span class="nav-symbol">⇅</span>提供</a
+          >
+          <a href="#/settings" data-page="settings"
+            ><span class="nav-symbol">⚙</span>设置</a
+          >
+        </nav>
+        <div class="sidebar-bottom">
+          <div id="connection"><i class="dot"></i>连接服务中</div>
+          <span id="sidebar-provider">提供模式关闭</span>
+          <button id="exit-gateway" class="button button-ghost" type="button">
+            退出管理界面
+          </button>
+        </div>
+      </aside>
+      <main class="page-main">
+        <header class="page-heading">
+          <h1 id="title">概览</h1>
+          <div class="heading-tools">
+            <button id="refresh-magnets" class="button button-primary" type="button">更新磁力链接</button>
+            <div id="heading-actions" class="action-row"></div>
+            <span id="refresh-time">尚未刷新</span
+            ><button id="refresh" class="button button-ghost" type="button">
+              重扫本地
+            </button>
+          </div>
+        </header>
+        <nav
+          id="section-nav"
+          class="section-nav"
+          aria-label="页面导航"
+          hidden
+        ></nav>
+        <div id="error" class="callout error-callout" role="alert" hidden></div>
+        <div id="catalog-refresh-result" class="callout" role="status" hidden></div>
+        <section
+          id="context"
+          class="context-bar"
+          aria-label="当前数据范围"
+          hidden
+        >
+          <label
+            >数据集<select id="dataset" aria-label="选择数据集"></select
+          ></label>
+          <label
+            >频率<select id="frequency" aria-label="选择频率"></select
+          ></label>
+          <label class="scope-date"
+            >开始日期<input id="start" type="date" /></label
+          ><span class="range-separator">—</span>
+          <label class="scope-date"
+            >结束日期<input id="end" type="date" /></label
+          ><button id="apply-scope" class="button" type="button">
+            应用范围
+          </button>
+        </section>
+        <div id="view" aria-live="polite">
+          <div class="empty-state">正在读取本地目录…</div>
+        </div>
+        <footer>
+          <span id="activity">本地工作台</span><span>FreeQuantDB</span>
+        </footer>
+      </main>
+    </div>
+    <dialog id="package-detail" class="drawer" aria-label="数据包详情">
+      <div class="drawer-top">
+        <h2>数据包详情</h2>
+        <button id="close-package" class="icon-button" aria-label="关闭详情">
+          ×
+        </button>
+      </div>
+      <div id="package-body"></div>
+    </dialog>
+    <div id="toast" role="status" hidden></div>
+  </body>
+</html>

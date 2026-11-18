@@ -1,0 +1,9 @@
+{
+  "start_date": "2005-01-04",
+  "end_date": "2005-12-30",
+  "rows": 329290,
+  "instruments": 1369,
+  "trading_days": 242,
+  "size_bytes": 9141340,
+  "magnet": "magnet:?xt=urn%3Abtih%3A373ec98650573e44cf6076c7958b8e256aef70d2&dn=2005.parquet"
+}

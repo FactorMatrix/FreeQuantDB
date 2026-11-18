@@ -1,0 +1,9 @@
+{
+  "schema_version": 5,
+  "datasets": [
+    "cn/stock/base/1d/index.json"
+  ],
+  "packages": [
+    "cn/stock/base/1d/2005/2005.parquet.json"
+  ]
+}
