@@ -61,16 +61,21 @@ def test_active_download_lifts_the_cap_for_old_seeds_and_restores_saved_limit(da
         wait_for(lambda: old_origin.status().is_seeding)
         client.call("peers_add", {"ip": "127.0.0.1", "port": publisher.listen_port()})
 
-        def verify_cap(limit, *, downloading=False):
+        def wait_for_mode(path, limit, mode):
             def observed():
-                status = client.get("/api/status")
-                return (
-                    status["effective_upload_limit"] == limit
-                    and status["upload_limit_mode"] == ("downloading" if downloading else "seeding")
-                    and client.call("priority_list")["global_upload_limit"] == limit
-                )
+                status = client.get(path)
+                if status["effective_upload_limit"] == limit and status["upload_limit_mode"] == mode:
+                    return status
 
-            wait_for(observed)
+            return wait_for(observed)
+
+        def verify_cap(limit, *, downloading=False):
+            mode = "downloading" if downloading else "seeding"
+            status = wait_for_mode("/api/status", limit, mode)
+            # The native cap and priority rules must describe the same worker tick.
+            priority = status["management"]["priority"]
+            assert priority["global_upload_limit"] == limit
+            return priority
 
         with gateway_session(client):
             verify_cap(DEFAULT_SEED_LIMIT)
@@ -94,12 +99,10 @@ def test_active_download_lifts_the_cap_for_old_seeds_and_restores_saved_limit(da
             new_origin = add(publisher, new_info, source)
             new_origin.set_upload_limit(96 * 1024)
             wait_for(lambda: new_origin.status().is_seeding)
-            verify_cap(0, downloading=True)
-            runtime = client.get("/api/console/runtime")
+            priority = verify_cap(0, downloading=True)
+            assert priority["rules"][0]["state"] == "waiting_rate_limit"
+            runtime = wait_for_mode("/api/console/runtime", 0, "downloading")
             assert runtime["settings"]["upload_limit"] == DEFAULT_SEED_LIMIT
-            assert runtime["effective_upload_limit"] == 0
-            assert runtime["upload_limit_mode"] == "downloading"
-            assert client.call("priority_list")["rules"][0]["state"] == "waiting_rate_limit"
 
             old_consumer = add(consumer, old_info, data_root / "SYNTHETIC-old-seed-peer")
             port = client.get("/api/status")["listen_port"]
