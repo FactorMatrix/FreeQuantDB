@@ -21,7 +21,7 @@ from fqdb.service.jobs import Jobs
 from fqdb.web.app import create_app
 from magnet_helpers import mirror
 from test_contracts import setup_store
-from gateway_helpers import gateway_session
+from gateway_helpers import gateway_session, loopback_config
 
 
 def wait_job(client, identity):
@@ -48,6 +48,7 @@ def test_sdk_subscriptions_refresh_catalog_without_implicit_download(data_root):
     exported = data_root / "SYNTHETIC-json-catalog"
     export_public_catalog(store, exported)
     subscriber = data_root / "SYNTHETIC-subscriber"
+    loopback_config(subscriber)
     fqdb.init(subscriber)
     client = Client(subscriber)
     session = ExitStack()
@@ -250,6 +251,7 @@ def test_public_management_facades_and_cli_use_one_owner(data_root):
     publisher = data_root / "SYNTHETIC-publisher"
     store, schema, _ = setup_store(publisher)
     root = data_root / "SYNTHETIC-manager"
+    loopback_config(root)
     fqdb.init(root)
     client = Client(root)
     session = ExitStack()

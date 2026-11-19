@@ -5,6 +5,14 @@ import threading
 
 import httpx
 
+from fqdb.config import Config
+
+
+def loopback_config(root):
+    config = Config(root).ensure()
+    config.update(listen="127.0.0.1:0", discovery=False)
+    return config
+
 
 @contextmanager
 def gateway_session(client):

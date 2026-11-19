@@ -35,7 +35,6 @@ export async function settings(ctx) {
       ["max_active", "并发下载数", 1],
       ["connections_limit", "连接上限", 1],
       ["download_limit", "下载上限（B/s，0 不限）", 0],
-      ["upload_limit", "上传上限（B/s，0 不限）", 0],
       ["peer_timeout", "停滞超时（秒）", 1],
       ["max_retries", "失败重试次数", 0],
     ]

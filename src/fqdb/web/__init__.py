@@ -9,15 +9,15 @@ from fqdb import api
 
 
 def run(*, data_dir=None, open_browser=True, port=0):
-    """Open until Ctrl+C or page exit; explicit downloads/providers may continue."""
+    """Open the workbench and activate the independent BT service."""
     if data_dir is not None:
         api.init(data_dir)
     client = api.client()
-    endpoint = client.ensure(port=port)
-    session_id = client.call("gateway_open")["session_id"]
+    endpoint, session = client.open_gateway(port=port)
+    session_id = session["session_id"]
     url = endpoint["url"] + "/?session=" + session_id
     headers = {"Authorization": "Bearer " + endpoint["token"]}
-    print(f"FQDB gateway: {url}\nCtrl+C 退出管理界面；已激活的下载和做种可继续运行。", flush=True)
+    print(f"FQDB gateway: {url}\nCtrl+C 退出管理界面，后台继续处理下载和做种。", flush=True)
     try:
         if open_browser:
             webbrowser.open(url)

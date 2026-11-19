@@ -18,6 +18,7 @@ from fqdb.service.client import Client
 from fqdb.storage.metadata import Store
 from fqdb.storage.query import get_price
 from fqdb.util import atomic_bytes, sha256
+from gateway_helpers import loopback_config
 from magnet_helpers import mirror
 from test_contracts import DAYS, STOCK, sample_frame, sample_schema
 
@@ -37,6 +38,7 @@ def nodes(data_root):
     clients = [Client(data_root / name) for name in ("A", "B", "C")]
     try:
         for c in clients:
+            loopback_config(c.config.root)
             c.config.update(peer_timeout=8, max_retries=0)
             c.ensure()
         yield clients
@@ -255,7 +257,6 @@ def test_trusted_bytes_can_still_contain_invalid_market_records(nodes):
 def test_public_catalog_download_activates_native_bytes_without_a_second_scan(nodes, data_root, monkeypatch):
     from fqdb import util
     from fqdb.bt import torrents
-    from fqdb.config import Config
     from fqdb.publish.catalog import export_public_catalog
     from fqdb.publish import paths
     from fqdb.service.core import Owner
@@ -265,7 +266,7 @@ def test_public_catalog_download_activates_native_bytes_without_a_second_scan(no
     entry = Entry(**prepare_publisher(producer)["entries"][0])
     source = data_root / "SYNTHETIC-PUBLIC-V5"
     export_public_catalog(Store(producer.config.root), source, period=entry.period)
-    consumer = Owner(Config(data_root / "v4-receiver"))
+    consumer = Owner(loopback_config(data_root / "v4-receiver"))
     consumer.catalogs.add(str(source))
     consumer.peers.add("127.0.0.1", producer.get("/api/status")["listen_port"])
 

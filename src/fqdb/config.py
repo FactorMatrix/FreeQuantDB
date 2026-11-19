@@ -10,8 +10,8 @@ from .util import FQDBError, atomic_json
 _current_root: Path | None = None
 DEFAULT_UPLOAD_LIMIT = 1_000_000
 DEFAULTS = {
-    "listen": "127.0.0.1:0",
-    "discovery": False,
+    "listen": "0.0.0.0:0",
+    "discovery": True,
     "max_active": 4,
     "connections_limit": 80,
     "download_limit": 0,
@@ -21,6 +21,7 @@ DEFAULTS = {
     "retry_interval": 10,
     "peer_nodes": [],
     "provider": False,
+    "auto_seed": True,
     "provider_scopes": [],
     "provider_start": None,
     "provider_end": None,
@@ -114,6 +115,8 @@ class Config:
         for key in ("upload_limit", "download_limit", "max_retries"):
             if key in values and (not isinstance(values[key], int) or values[key] < 0):
                 raise FQDBError(f"{key} must be a nonnegative integer")
+        if "auto_seed" in values and type(values["auto_seed"]) is not bool:
+            raise FQDBError("auto_seed must be boolean")
         if "peer_nodes" in values:
             from .bt.priority import canonical_ip
 

@@ -10,7 +10,7 @@ fqdb plan cn/stock/base --frequency 1d --year 2005
 fqdb download cn/stock/base --frequency 1d --year 2005
 ```
 
-同步后，下载使用本地包说明中的磁力链接。通过 DHT 寻找节点时，在开始下载或做种前运行 `fqdb settings --discovery on`。也可以用 `fqdb peers add NODE_IP NODE_PORT` 指定已知节点。
+同步后，下载使用本地包说明中的磁力链接。新安装默认启用 DHT 发现。如果当前目录曾关闭发现，可用 `fqdb settings --discovery on` 重新启用。也可以用 `fqdb peers add NODE_IP NODE_PORT` 指定已知节点。
 
 独立镜像沿用根索引和相对目录结构。用 `fqdb catalog add MIRROR_URL` 配置并同步镜像，或用 `fqdb catalog import /path/to/catalog` 导入本地说明。已同步的磁力在目录服务离线时仍可使用。
 

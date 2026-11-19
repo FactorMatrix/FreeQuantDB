@@ -8,10 +8,10 @@ import pyarrow.parquet as pq
 
 from fqdb.catalog.magnet_manifest import SCHEMA_VERSION, dataset_path, package_path
 from fqdb.catalog.models import Entry
-from fqdb.config import Config
 from fqdb.service.core import Owner
 from fqdb.util import atomic_json
 from fqdb.web.app import create_app
+from gateway_helpers import loopback_config
 
 
 CN = "cn/stock/base/1d"
@@ -52,7 +52,7 @@ def _open(owner):
 
 
 def test_catalog_views_offline_and_manual_file_evidence(data_root, monkeypatch):
-    owner = Owner(Config(data_root / "client"))
+    owner = Owner(loopback_config(data_root / "client"))
     catalog = owner.store.root / "catalog"
     client = _open(owner)
     try:
@@ -113,7 +113,7 @@ def test_catalog_views_offline_and_manual_file_evidence(data_root, monkeypatch):
         )
         response = client.post("/api/action/download_package", json={"catalog_path": descriptor})
         assert response.status_code == 400 and "magnet" in response.json()["error"]
-        assert owner.store.tasks() == [] and owner._engine is None
+        assert owner.store.tasks() == [] and owner.engine.handles == {}
 
         checked = client.post("/api/action/catalog_check", json={"catalog_path": descriptor}).json()
         assert checked["coverage_status"] == "verified"
@@ -138,7 +138,7 @@ def test_catalog_views_offline_and_manual_file_evidence(data_root, monkeypatch):
 
 
 def test_package_waiting_for_peers_and_failed_refresh_keep_same_catalog(data_root):
-    owner = Owner(Config(data_root / "client"))
+    owner = Owner(loopback_config(data_root / "client"))
     catalog = owner.store.root / "catalog"
     client = _open(owner)
     try:
@@ -169,7 +169,7 @@ def test_package_waiting_for_peers_and_failed_refresh_keep_same_catalog(data_roo
         assert waiting["status"] == "no_peers"
         assert waiting["local_status"] == "missing" and waiting["magnet_status"] == "available"
         assert waiting["task"]["id"] == identity
-        assert owner._engine is None
+        assert owner.engine.handles == {}
 
         data_before = (catalog / available).read_bytes()
         bad_source = data_root / "missing-source"

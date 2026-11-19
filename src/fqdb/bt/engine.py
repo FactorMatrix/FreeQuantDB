@@ -54,6 +54,8 @@ class Engine:
         )
         self.handles = {}
         self.uploads = set()
+        self.moves = {}
+        self.resume_seeds = set()
         self.saved_at = 0
         self.errors = {}
         self.metadata_pending = set()
@@ -87,11 +89,15 @@ class Engine:
         if identity in self.handles:
             return self.handles[identity]
         info = inspect(Path(torrent_path).read_bytes(), self.root)
+        if str(info.info_hashes().v1) != identity:
+            raise FQDBError("Cached metadata does not match the original info-hash")
         resume = runtime_path(self.root, "state") / f"{identity}.fastresume"
         params = lt.add_torrent_params()
-        if not upload_only and resume.exists():
+        if not recheck and resume.exists():
             try:
-                params = lt.read_resume_data(resume.read_bytes())
+                saved = lt.read_resume_data(resume.read_bytes())
+                if str(saved.info_hashes.v1) == identity and Path(saved.save_path) == Path(save_path):
+                    params = saved
             except Exception:
                 log.exception("Ignoring invalid resume metadata: %s", identity)
         params.ti = info
@@ -118,6 +124,8 @@ class Engine:
         self.handles[identity] = handle
         if upload_only:
             self.uploads.add(identity)
+            if not recheck:
+                self.resume_seeds.add(identity)
         if recheck:
             handle.force_recheck()
         return handle
@@ -160,7 +168,7 @@ class Engine:
         # Open the payload from the verified torrent. The metadata-only handle
         # can have closed peers and file priorities assigned before validation.
         self.remove(identity)
-        self.add(identity, target, status.save_path, recheck=True, magnet=entry.magnet)
+        self.add(identity, target, status.save_path, magnet=entry.magnet)
         self.metadata_audit[identity].update(
             metadata_validated=True,
             metadata_bytes=len(info.info_section()),
@@ -170,14 +178,51 @@ class Engine:
 
     def remove(self, identity):
         h = self.handles.pop(identity, None)
-        self.uploads.discard(identity)
-        self.metadata_pending.discard(identity)
         if h and h.is_valid():
+            if identity in self.resume_seeds and identity not in self.moves:
+                h.save_resume_data(lt.torrent_handle.only_if_modified)
             self.session.remove_torrent(h)  # Never request delete_files.
+        self.uploads.discard(identity)
+        self.resume_seeds.discard(identity)
+        self.metadata_pending.discard(identity)
+        self._release_staging(identity)
+
+    def promote(self, identity, source, final):
+        """Keep the live torrent and point it at the installed local snapshot."""
+        handle = self.handles[identity]
+        # Normal activation installs a hard link to the already verified inode.
+        # Other filesystems or an existing snapshot need native piece checking.
+        flags = (
+            lt.move_flags_t.reset_save_path_unchecked
+            if source.samefile(final)
+            else lt.move_flags_t.reset_save_path
+        )
+        stat = source.stat()
+        handle.set_flags(lt.torrent_flags.upload_mode)
+        handle.move_storage(str(final.parent), flags)
+        self.moves[identity] = (source, stat.st_dev, stat.st_ino)
+        self.uploads.add(identity)
+        self.resume_seeds.add(identity)
+
+    def _release_staging(self, identity):
+        move = self.moves.pop(identity, None)
+        if move is None:
+            return
+        source, device, inode = move
+        try:
+            stat = source.stat()
+            if (stat.st_dev, stat.st_ino) == (device, inode):
+                source.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            log.warning("Could not remove completed staging file for %s", identity, exc_info=True)
 
     def connect(self, peers):
-        for h in list(self.handles.values()):
-            if h.is_valid() and not h.status().is_seeding:
+        if not peers:
+            return
+        for identity, h in list(self.handles.items()):
+            if identity not in self.uploads and h.is_valid() and not h.status().is_seeding:
                 for host, port in peers:
                     # A configured endpoint supplies no uTP capability hint.
                     h.connect_peer((host, int(port)), 0, PEX_ENCRYPTION)
@@ -185,25 +230,31 @@ class Engine:
     def poll(self):
         for alert in self.session.pop_alerts():
             if isinstance(alert, lt.save_resume_data_alert):
-                identity = str(alert.handle.info_hashes().v1)
+                identity = str(alert.params.info_hashes.v1)
                 atomic_bytes(
                     runtime_path(self.root, "state") / f"{identity}.fastresume",
                     bytes(lt.write_resume_data_buf(alert.params)),
                 )
-            elif isinstance(alert, (lt.torrent_error_alert, lt.file_error_alert)):
+            elif isinstance(alert, lt.storage_moved_alert):
                 identity = str(alert.handle.info_hashes().v1)
-                self.errors[identity] = alert.message()
-                log.error("%s", alert.message())
-            elif isinstance(alert, lt.storage_moved_failed_alert):
-                self.errors[str(alert.handle.info_hashes().v1)] = alert.message()
+                if identity in self.moves and alert.handle == self.handles.get(identity):
+                    self._release_staging(identity)
+                    alert.handle.save_resume_data()
+            elif isinstance(alert, (lt.torrent_error_alert, lt.file_error_alert, lt.storage_moved_failed_alert)):
+                identity = str(alert.handle.info_hashes().v1)
+                if alert.handle == self.handles.get(identity):
+                    self.errors[identity] = alert.message()
+                    log.error("%s", alert.message())
         if time.monotonic() - self.saved_at > 5:
-            self.save_resume()
+            self.save_resume(lt.torrent_handle.only_if_modified)
             self.saved_at = time.monotonic()
 
-    def save_resume(self):
+    def save_resume(self, flags=0):
         for identity, h in list(self.handles.items()):
-            if identity not in self.uploads and identity not in self.metadata_pending and h.is_valid():
-                h.save_resume_data()
+            if (identity not in self.uploads or identity in self.resume_seeds) and (
+                identity not in self.metadata_pending and identity not in self.moves and h.is_valid()
+            ):
+                h.save_resume_data(flags)
 
     def close(self):
         self.save_resume()

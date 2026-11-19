@@ -1,7 +1,7 @@
 """Real loopback upload contention on synthetic bytes, with retained SSD evidence.
 
 No public tracker, DHT, public peer, real quotation or network reconfiguration is
-involved. The native 2.0.11 session owns all byte counters and bandwidth limits.
+involved. The native session owns all byte counters and bandwidth limits.
 """
 
 import json
@@ -111,20 +111,24 @@ def test_priority_real_contention_reconnect_delete_restart_and_same_ip():
 
     def sample(manager, label, seconds):
         records = [manager.status()]
+        started = time.monotonic()
         for _ in range(seconds):
             time.sleep(1)
             records.append(manager.status())
+        elapsed = time.monotonic() - started
         byte_delta = {}
         for ip in (TARGET, NORMAL):
             before = sum(p["uploaded"] for p in records[0]["connections"] if p["ip"] == ip)
             after = sum(p["uploaded"] for p in records[-1]["connections"] if p["ip"] == ip)
             byte_delta[ip] = after - before
         evidence["phases"].append(
-            {"label": label, "seconds": seconds, "bytes": byte_delta, "samples": records}
+            {"label": label, "seconds": elapsed, "bytes": byte_delta, "samples": records}
         )
         retain()
         assert all(value > 0 for value in byte_delta.values()), "Both native peers must actually receive data"
         assert all(record["global_upload_limit"] == LIMIT for record in records)
+        # Allow for the native bandwidth allocator's initial burst.
+        assert sum(byte_delta.values()) <= LIMIT * (elapsed + 2)
         return byte_delta
 
     try:

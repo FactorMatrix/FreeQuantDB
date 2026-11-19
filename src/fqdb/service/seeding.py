@@ -1,17 +1,20 @@
-"""Explicit provider lifecycle and verified native seed handles."""
+"""Restore verified local packages and manage native seed handles."""
 
 from __future__ import annotations
 
 from ipaddress import IPv4Address, IPv6Address
 import re
+from stat import S_ISREG
 import time
 
 import libtorrent as lt
 
-from ..bt.torrents import torrent_cache_path
+from ..bt.torrents import torrent_cache_path, validate_daily
 from ..publish.paths import resolve_file
-from ..util import FQDBError
+from ..util import FQDBError, safe_path
 from .provision import selected
+
+SEED_REFRESH_SECONDS = 2
 
 
 def normalize_listen(value):
@@ -36,10 +39,16 @@ class Seeding:
     def __init__(self, owner):
         self.owner, self.store, self.config, self.lock = owner, owner.store, owner.config, owner.lock
         self.enabled = False
+        self.automatic = False
+        self.gateway_activated = False
         self.parent_pid = None
         self.generation = 0
         self.verifying_seeds = set()
         self.issues = []
+        self.native_issues = {}
+        self._candidates = {}
+        self._refresh_after = 0
+        self._reconcile_after = 0
         self.state = {
             "status": "stopped",
             "message": "做种已停止。",
@@ -50,24 +59,47 @@ class Seeding:
         }
 
     def has_work(self):
-        return bool(self.enabled or self.verifying_seeds)
+        if self.verifying_seeds:
+            return True
+        if not self.enabled or not self.automatic:
+            return self.enabled
+        engine = self.owner._engine
+        return engine is not None and bool(engine.uploads)
+
+    def start_auto(self):
+        with self.lock:
+            self.gateway_activated = True
+            if self.enabled or self.state["status"] == "preparing" or not self.config.read()["auto_seed"]:
+                return
+            self.enabled = self.automatic = True
+            self.native_issues.clear()
+            self.state = self.state | {"checked": 0, "prepared": 0, "issues": []}
+            self._invalidate()
+            self.reconcile()
 
     def deactivate(self):
         self.enabled = False
+        self.automatic = False
         self.parent_pid = None
         self.generation += 1
-        self.state = self.state | {"status": "stopped", "message": "做种已停止。"}
+        self.issues = []
+        self._candidates = {}
+        self._invalidate()
+        self.state = self.state | {"status": "stopped", "message": "做种已暂停。", "eligible": 0, "issues": []}
 
     def stop(self, args):
         if "parent_pid" in args and args["parent_pid"] != self.parent_pid:
             return self.owner.status()
         self.deactivate()
-        self.config.update(provider=False)
+        if "parent_pid" in args:
+            self.config.update(provider=False)
+            if self.gateway_activated:
+                self.start_auto()
+        else:
+            self.config.update(provider=False, auto_seed=False)
         engine = self.owner._engine
-        for identity in list(engine.handles) if engine is not None else []:
-            task = self.store.task(identity)
-            if task is None or task["status"] in ("complete", "failed", "cancelled", "paused"):
-                engine.remove(identity)
+        if engine is not None:
+            self.reconcile()
         return self.owner.status()
 
     def verify(self, entry):
@@ -113,64 +145,111 @@ class Seeding:
     def wants_seed(self, entry):
         return self.enabled and selected(entry, self.config.read())
 
+    def native_error(self, identity, reason):
+        self.native_issues[identity] = reason
+        self._invalidate()
+
+    def storage_changed(self, identity):
+        self.native_issues.pop(identity, None)
+        self._invalidate()
+
+    def _invalidate(self):
+        self._refresh_after = 0
+        self._reconcile_after = 0
+
     def seed_candidates(self):
-        if not self.enabled:
-            self.issues = []
-            return []
+        current = time.monotonic()
+        if current < self._refresh_after:
+            return self._candidates
         cfg = self.config.read()
-        entries = (
-            self.store.entries(latest=False)
-            if cfg["seed_old_versions"]
-            else [e for e, _ in self.store.active()]
-        )
+        active = {e.info_hash: e for e, _ in self.store.active()}
         cached = self.store.verified_versions()
+        entries = self.store.entries_by_hash(cached) if cfg["seed_old_versions"] else active
         self.issues = []
-        ready = []
-        for entry in entries:
+        ready = {}
+        for identity, entry in entries.items():
             if not selected(entry, cfg):
                 continue
             try:
-                stat = resolve_file(self.config.root, entry, immutable=True).stat()
+                path = resolve_file(self.config.root, entry, immutable=True)
+                snapshots = [path.stat()]
+                if identity in active:
+                    snapshots.append(safe_path(self.config.root, entry.file).stat())
+                metadata_exists = torrent_cache_path(self.config.root, entry).is_file()
             except FileNotFoundError:
                 self.issues.append({"entry": entry.to_dict(), "reason": "published_but_local_missing"})
                 continue
-            evidence = cached.get(entry.info_hash)
-            # A changed file must be explicitly revalidated before providing.
-            if evidence and stat.st_size == evidence["size"] and stat.st_mtime_ns == evidence["mtime_ns"]:
-                ready.append(entry)
-            else:
+            except (FQDBError, OSError) as exc:
+                self.issues.append({"entry": entry.to_dict(), "reason": "data_invalid", "detail": str(exc)})
+                continue
+            evidence = cached.get(identity)
+            replaced = len(snapshots) == 2 and (
+                snapshots[0].st_dev == snapshots[1].st_dev and snapshots[0].st_ino != snapshots[1].st_ino
+            )
+            if replaced or not evidence or any(
+                not S_ISREG(stat.st_mode)
+                or (stat.st_size, stat.st_mtime_ns) != (evidence["size"], evidence["mtime_ns"])
+                for stat in snapshots
+            ):
                 self.issues.append({"entry": entry.to_dict(), "reason": "local_file_changed_or_unverified"})
-        return ready
+            elif not metadata_exists:
+                self.issues.append({"entry": entry.to_dict(), "reason": "missing_torrent_metadata"})
+            elif identity in self.native_issues:
+                self.issues.append({"entry": entry.to_dict(), "reason": "data_invalid", "detail": self.native_issues[identity]})
+            else:
+                ready[identity] = entry
+        self._candidates = ready
+        self._refresh_after = current + SEED_REFRESH_SECONDS
+        return self._candidates
 
     def status(self):
         result = dict(self.state)
         if self.enabled:
-            eligible_ids = {entry.info_hash for entry in self.seed_candidates()}
-            eligible = len(eligible_ids)
+            candidates = self.seed_candidates()
             states = (
                 [
                     h.status()
                     for identity, h in self.owner._engine.handles.items()
-                    if identity in eligible_ids and h.is_valid()
+                    if identity in candidates and h.is_valid() and identity not in self.owner._engine.moves
                 ]
                 if self.owner._engine is not None
                 else []
             )
-            if any(s.upload_rate > 0 for s in states):
+            seeding = [s for s in states if s.is_seeding]
+            eligible = len(candidates)
+            if any(s.upload_rate > 0 for s in seeding):
                 status, message = "sharing", f"正在上传，可提供 {eligible} 个数据包。"
-            elif any(s.num_peers > 0 for s in states):
+            elif any(s.num_peers > 0 for s in seeding):
                 status, message = "ready", f"可提供 {eligible} 个数据包，已连接，等待数据请求。"
-            elif eligible:
+            elif seeding:
                 status, message = "waiting_peers", f"已开启做种，可提供 {eligible} 个数据包，等待连接。"
+            elif candidates:
+                status, message = "checking", "正在检查本地数据，请稍候。"
+            elif any(i["reason"] == "published_but_local_missing" for i in self.issues):
+                status, message = "missing_files", "本地数据文件缺失，暂时无法做种。"
+            elif any(i["reason"] == "missing_torrent_metadata" for i in self.issues):
+                status, message = "pending_metadata", "缺少原始种子元数据，暂时无法做种。"
+            elif self.issues:
+                status, message = "invalid_data", "本地文件有异常，暂时无法做种。"
             else:
-                status, message = "invalid_data", "当前没有通过校验的可提供数据。"
-            result.update(status=status, message=message, eligible=eligible)
+                status, message = "no_data", "暂无可做种数据。"
+            result.update(status=status, message=message, eligible=eligible, issues=self.issues)
+        elif self.gateway_activated and result["status"] == "stopped":
+            result.update(eligible=len(self.seed_candidates()), issues=self.issues)
         return result
 
     def start(self, args):
         from .provision import prepare
         from ..catalog.magnet_manifest import scope_identity
         from ..util import day
+
+        if args.get("auto") is True:
+            if args.keys() != {"auto"}:
+                raise FQDBError("Automatic seeding uses the saved provider settings")
+            with self.lock:
+                self.config.update(auto_seed=True)
+                self.start_auto()
+                return self.owner.status()
 
         cfg = self.config.read()
         scopes = args.get("datasets", cfg["provider_scopes"])
@@ -208,16 +287,16 @@ class Seeding:
         }
         with self.lock:
             if listen is not None:
-                engine = self.owner._engine
-                if engine is not None and listen != engine.session.get_settings()["listen_interfaces"]:
-                    raise FQDBError("Stop active BT work before changing the listen address")
-                if listen != self.config.read()["listen"]:
-                    self.config.update(listen=listen)
+                self.owner.peers.settings({"listen": listen})
             self.generation += 1
             generation = self.generation
             self.enabled = False
+            self.automatic = False
             self.parent_pid = None
             self.issues = []
+            self.native_issues.clear()
+            self._candidates = {}
+            self._invalidate()
             self.state = {
                 "status": "preparing",
                 "message": "正在准备并校验本地数据。",
@@ -268,35 +347,48 @@ class Seeding:
                     seed_old_versions=historical,
                 )
                 if prepared["eligible"]:
+                    if parent_pid is None:
+                        self.config.update(auto_seed=True)
                     self.owner.engine.session.apply_settings({"upload_rate_limit": limit})
                     self.owner.peers.apply_priority()
                     self.enabled = True
                     self.parent_pid = parent_pid
+                    self._invalidate()
                     self.owner.tick()
                 return self.owner.status()
 
     def reconcile(self):
+        now = time.monotonic()
+        if now < self._reconcile_after:
+            return
+        self._reconcile_after = now + SEED_REFRESH_SECONDS
         root = self.config.root
-        wanted = {e.info_hash: e for e in self.seed_candidates()}
-        for identity, h in list(self.owner.engine.handles.items()):
-            task = self.store.task(identity)
-            if (
-                identity not in wanted
-                and identity not in self.verifying_seeds
-                and (task is None or task["status"] in ("complete", "failed", "cancelled", "paused"))
-            ):
-                self.owner.engine.remove(identity)
+        engine = self.owner.engine
+        wanted = self.seed_candidates() if self.enabled else {}
+        for identity in engine.uploads - self.verifying_seeds:
+            if identity not in wanted:
+                engine.remove(identity)
+            elif identity not in engine.moves:
+                status = engine.handles[identity].status()
+                if not status.is_seeding and status.state not in (
+                    lt.torrent_status.queued_for_checking,
+                    lt.torrent_status.checking_resume_data,
+                    lt.torrent_status.checking_files,
+                ):
+                    self.native_error(identity, "本地文件未通过 BT 分片检查。")
+                    engine.remove(identity)
         for identity, entry in wanted.items():
-            task = self.store.task(identity)
-            if identity not in self.owner.engine.handles and (
-                not task or task["status"] in ("complete", "failed", "cancelled", "paused")
-            ):
-                handle = self.owner.engine.add(
+            if identity in engine.handles or identity in self.native_issues or self.owner.transfers.is_active(identity):
+                continue
+            metadata = torrent_cache_path(root, entry)
+            try:
+                validate_daily(metadata.read_bytes(), entry, root)
+                engine.add(
                     identity,
-                    torrent_cache_path(root, entry),
+                    metadata,
                     resolve_file(root, entry, immutable=True).parent,
-                    recheck=True,
                     upload_only=True,
                     magnet=entry.magnet,
                 )
-                handle.set_flags(lt.torrent_flags.upload_mode)
+            except Exception as exc:
+                self.native_error(identity, str(exc))

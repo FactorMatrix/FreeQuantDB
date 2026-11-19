@@ -13,6 +13,7 @@ import time
 from playwright.sync_api import expect, sync_playwright
 
 from fqdb.service.client import Client
+from gateway_helpers import loopback_config
 
 
 def until(predicate, timeout=20):
@@ -35,6 +36,7 @@ def main():
     evidence = root / "browser-evidence"
     evidence.mkdir()
     client = Client(root / "SYNTHETIC-data")
+    loopback_config(client.config.root)
     log_path = evidence / "gateway.log"
     checks, errors = [], []
 
@@ -69,10 +71,13 @@ def main():
                 page.locator(f'.sidebar [data-page="{name}"]').click()
                 expect(page.locator("#view")).not_to_contain_text("当前页面尚未加载完成")
                 expect(page.locator("#view")).not_to_contain_text("正在读取本地状态…")
+                if name == "provider":
+                    expect(page.locator("#provider-state")).to_have_text("做种已开启")
+                    expect(page.locator("#provider-message")).to_have_text("暂无可做种数据")
             page.locator('.sidebar [data-page="overview"]').click()
             page.screenshot(path=str(evidence / "gateway-open.png"), full_page=True)
             checks.append(
-                "Six real management pages open on an empty synthetic root without activating provision."
+                "Six real management pages open with automatic sharing enabled and no packages to seed."
             )
             page.reload()
             expect(page.locator("#connection")).to_contain_text("本地服务在线")

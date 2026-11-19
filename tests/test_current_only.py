@@ -16,7 +16,8 @@ from fqdb.storage.query import get_price
 from fqdb.util import FQDBError
 
 
-def test_current_root_contains_no_layout_aliases(data_root):
+def test_current_root_contains_no_layout_aliases(empty_data_root):
+    data_root = empty_data_root
     config = Config(data_root).ensure()
     assert config.layout == "canonical"
     assert {p.name for p in data_root.iterdir()} == {"data", "catalog", ".state"}
@@ -27,7 +28,8 @@ def test_current_root_contains_no_layout_aliases(data_root):
 
 
 @pytest.mark.parametrize("old_path", ["config.json", "state", "staging"])
-def test_obsolete_root_is_rejected_without_migration(data_root, old_path):
+def test_obsolete_root_is_rejected_without_migration(empty_data_root, old_path):
+    data_root = empty_data_root
     path = data_root / old_path
     if old_path.endswith(".json"):
         path.write_text("{}")
@@ -39,7 +41,8 @@ def test_obsolete_root_is_rejected_without_migration(data_root, old_path):
     assert not (data_root / ".state").exists()
 
 
-def test_obsolete_layout_marker_is_not_accepted(data_root):
+def test_obsolete_layout_marker_is_not_accepted(empty_data_root):
+    data_root = empty_data_root
     state = data_root / ".state"
     state.mkdir()
     (state / "layout.json").write_text(json.dumps({"schema_version": 1, "mode": "canonical"}))

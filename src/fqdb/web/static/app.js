@@ -40,7 +40,7 @@ function gatewayEnded() {
   $("#exit-gateway").disabled = true;
   $("#view").innerHTML = empty(
     "管理界面已退出",
-    "已激活的下载和做种可继续运行；再次进入请运行 fqdb gateway。",
+    "已开始的下载和做种会在后台继续。再次进入请运行 fqdb gateway。",
   );
 }
 
@@ -213,15 +213,16 @@ function fillContext() {
 }
 function paintRuntime(runtime) {
   $("#connection").innerHTML = '<i class="dot"></i>本地服务在线';
-  $("#sidebar-provider").textContent = runtime.provider
-    ? "提供模式开启"
-    : "提供模式关闭";
+  const seeding = runtime.provider
+    ? "做种已开启"
+    : runtime.settings.auto_seed === false ? "做种已暂停" : "做种未开启";
+  $("#sidebar-provider").textContent = seeding;
   $("#refresh-time").textContent = new Date().toLocaleTimeString("zh-CN", {
     hour12: false,
   });
   if ($("#overview-runtime"))
     $("#overview-runtime").innerHTML =
-      `${pill(runtime.provider ? "local" : "pending", runtime.provider ? "提供模式开启" : "提供模式关闭")}<span class="tag">↓ ${rate(runtime.download_rate)}</span><span class="tag">↑ ${rate(runtime.upload_rate)}</span><span class="tag">${num(runtime.peer_connections)} 个节点连接</span>`;
+      `${pill(runtime.provider ? "local" : "pending", seeding)}<span class="tag">↓ ${rate(runtime.download_rate)}</span><span class="tag">↑ ${rate(runtime.upload_rate)}</span><span class="tag">${num(runtime.peer_connections)} 个节点连接</span>`;
 }
 function acceptSummary(data) {
   state.summary = data;
@@ -410,7 +411,7 @@ setInterval(async () => {
   try {
     const runtime = await request("/api/console/runtime");
     paintRuntime(runtime);
-    if (current.poll) await current.poll();
+    if (current.poll) await current.poll(runtime);
   } catch (e) {
     if (e.name !== "AbortError") $("#connection").textContent = "服务连接中断";
   } finally {

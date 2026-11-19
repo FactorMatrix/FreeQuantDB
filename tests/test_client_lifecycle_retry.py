@@ -103,3 +103,30 @@ def test_passive_read_retries_idle_shutdown_rejection(monkeypatch):
     client = rpc_client(monkeypatch, handler)
     assert client.get("/api/status") == {"provider": False}
     assert len(attempts) == 2
+
+
+def test_gateway_open_returns_the_endpoint_that_accepted_its_lease(monkeypatch):
+    attempts = []
+    worker = object.__new__(Client)
+    old = {"url": "http://127.0.0.1:12345", "token": "SYNTHETIC-replaced-worker"}
+    new = {"url": old["url"], "token": "SYNTHETIC-replacement-worker"}
+    ports = []
+    endpoints = iter([old, new])
+
+    def ensure(port):
+        ports.append(port)
+        return next(endpoints)
+
+    def post(endpoint, action, args, timeout):
+        attempts.append(endpoint)
+        assert action == "gateway_open" and args == {} and timeout == 120
+        if endpoint == old:
+            raise httpx.ConnectError("worker closed its listener")
+        return {"session_id": "SYNTHETIC-lease"}
+
+    monkeypatch.setattr(worker, "ensure", ensure)
+    monkeypatch.setattr(worker, "_post", post)
+    monkeypatch.setattr("fqdb.service.client.time.sleep", lambda _: None)
+    assert worker.open_gateway(port=12345) == (new, {"session_id": "SYNTHETIC-lease"})
+    assert attempts == [old, new]
+    assert ports == [12345, 12345]

@@ -56,7 +56,7 @@ def run(datasets=None, upload_limit=None, *, data_dir=None, **scope):
 
 
 def stop():
-    """Stop explicit sharing without starting an idle service."""
+    """Pause sharing and keep it paused on the next Gateway start."""
     client = api.client()
     from filelock import FileLock, Timeout
     import time
@@ -66,7 +66,7 @@ def stop():
     while client.endpoint() is None:
         try:
             with FileLock(runtime_path(client.config.root, "state") / "service.lock", timeout=0):
-                settings = client.config.update(provider=False)
+                settings = client.config.update(provider=False, auto_seed=False)
                 return {
                     "provider": False,
                     "enabled": False,

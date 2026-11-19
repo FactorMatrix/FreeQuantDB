@@ -551,6 +551,19 @@ textarea:focus {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   border-radius: 5px;
 }
+.metric-grid.provider-metrics {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+#provider-metrics .metric-card {
+  border-bottom: 0;
+}
+.provider-settings {
+  align-items: start;
+}
+#provider-issues td:first-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .chips {
   display: flex;
   gap: 7px;

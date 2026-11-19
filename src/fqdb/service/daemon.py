@@ -1,4 +1,4 @@
-"""On-demand worker, retained only by gateway leases or explicitly active work."""
+"""Detached worker for Gateway leases, transfers and local seeding."""
 
 from __future__ import annotations
 
@@ -103,9 +103,9 @@ def serve(root=None, port=0):
                     with owner.lock:
                         parent_pid = owner.seeding.parent_pid
                         if parent_pid is not None and not process_alive(parent_pid):
-                            # This only releases the provider reason; independent
-                            # downloads and gateway sessions remain authorized.
-                            owner.dispatch("provider_stop", {})
+                            # A foreground provider exit does not set the
+                            # user's persistent Gateway pause preference.
+                            owner.dispatch("provider_stop", {"parent_pid": parent_pid})
                     # Lease expiry changes runtime gateway authorization before
                     # considering work. Polls alone never keep a worker alive.
                     gateway = owner.lifetime.has_gateway()

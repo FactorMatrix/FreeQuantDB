@@ -219,7 +219,15 @@ def test_provider_run_without_options_preserves_saved_advanced_settings(data_roo
         while "Ctrl+C" not in output.read_text() and time.monotonic() < deadline:
             time.sleep(0.05)
         first_line = output.read_text().splitlines()[0]
-        assert "可提供 1 个数据包" in first_line and "等待连接" in first_line
+        assert "Ctrl+C 停止" in first_line
+        assert "正在检查本地数据" in first_line or "可提供 1 个数据包，等待连接" in first_line
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            provision = client.get("/api/status")["provision"]
+            if provision["status"] == "waiting_peers":
+                break
+            time.sleep(0.1)
+        assert provision["status"] == "waiting_peers" and provision["eligible"] == 1
         process.send_signal(signal.SIGINT)
         assert process.wait(timeout=20) == 0, output.read_text()
         finished = json.loads(output.read_text().split("\n", 1)[1])

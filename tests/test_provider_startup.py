@@ -22,6 +22,7 @@ from fqdb.service.core import Owner
 from fqdb.service import provision
 from fqdb.service.client import Client
 from fqdb.storage.metadata import Store
+from gateway_helpers import loopback_config
 from test_contracts import setup_store
 
 
@@ -257,7 +258,7 @@ def test_missing_foreign_piece_parameters_never_create_a_replacement_swarm(data_
     original = immutable_file(source, entry)
     identity, _ = create_metadata(original, piece_size=64 * 1024)
     assert identity != entry.info_hash
-    store = Store(Config(data_root / "SYNTHETIC-receiver").ensure().root)
+    store = Store(loopback_config(data_root / "SYNTHETIC-receiver").root)
     store.register(schema)
     custom_entry = replace(entry, info_hash=identity, magnet="")
     store.add_entry(custom_entry)
@@ -321,12 +322,13 @@ def test_provider_status_excludes_uploads_from_unrelated_download_handles(data_r
     def handle(upload_rate, peers):
         return SimpleNamespace(
             is_valid=lambda: True,
-            status=lambda: SimpleNamespace(upload_rate=upload_rate, num_peers=peers),
+            status=lambda: SimpleNamespace(upload_rate=upload_rate, num_peers=peers, is_seeding=True),
         )
 
     owner._engine = SimpleNamespace(
         handles={e.info_hash: handle(0, 0) for e in store.entries()}
         | {"SYNTHETIC-unrelated-download": handle(500, 3)},
+        moves={},
         close=lambda: None,
     )
     owner.seeding.enabled = True

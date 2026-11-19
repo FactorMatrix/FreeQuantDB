@@ -124,23 +124,30 @@ class PeerSettings:
         return self._save_rules(rules)
 
     def settings(self, args):
-        if self.owner._engine is not None and ("listen" in args or "discovery" in args):
-            raise FQDBError("Stop active BitTorrent work before changing listen or discovery")
         if "listen" in args:
             from .seeding import normalize_listen
 
             args["listen"] = normalize_listen(args["listen"])
         if "discovery" in args and type(args["discovery"]) is not bool:
             raise FQDBError("Discovery must be boolean")
+        current = self.config.read()
+        engine = self.owner._engine
+        network_changed = any(key in args and args[key] != current[key] for key in ("listen", "discovery"))
+        if network_changed and engine is not None and engine.handles:
+            raise FQDBError("Stop active BitTorrent work before changing listen or discovery")
         result = self.config.update(**args)
-        if self.owner._engine is not None:
-            self.owner._engine.session.apply_settings(
-                {
-                    "upload_rate_limit": result["upload_limit"],
-                    "download_rate_limit": result["download_limit"],
-                    "connections_limit": result["connections_limit"],
-                }
-            )
+        if engine is not None:
+            native = {
+                "upload_rate_limit": result["upload_limit"],
+                "download_rate_limit": result["download_limit"],
+                "connections_limit": result["connections_limit"],
+            }
+            if "listen" in args and result["listen"] != current["listen"]:
+                native["listen_interfaces"] = result["listen"]
+            if "discovery" in args and result["discovery"] != current["discovery"]:
+                engine.discovery = result["discovery"]
+                native.update(enable_dht=engine.discovery, enable_lsd=engine.discovery)
+            engine.session.apply_settings(native)
         self.apply_priority()
         return result
 

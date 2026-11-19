@@ -87,7 +87,7 @@ class Client:
             options = (
                 {"start_new_session": True}
                 if os.name != "nt"
-                else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                else {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
             )
             with open(runtime_path(self.config.root, "logs") / "service.log", "ab") as log:
                 process = subprocess.Popen(
@@ -168,9 +168,20 @@ class Client:
         return response.json()
 
     def call(self, action, args=None, timeout=120):
+        return self._retry_unaccepted(lambda: self._call_once(action, args, timeout))
+
+    def open_gateway(self, port=0):
+        def open_session():
+            endpoint = self.ensure(port=port)
+            return endpoint, self._post(endpoint, "gateway_open", {}, timeout=120)
+
+        return self._retry_unaccepted(open_session)
+
+    @staticmethod
+    def _retry_unaccepted(operation):
         for attempt in range(2):
             try:
-                return self._call_once(action, args, timeout)
+                return operation()
             except (httpx.ConnectError, _WorkerStopping) as exc:
                 # Connection failure occurs before dispatch. A worker can finish
                 # its idle shutdown between endpoint discovery and this POST.

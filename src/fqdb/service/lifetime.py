@@ -1,4 +1,4 @@
-"""Short, renewable dashboard sessions; downloads and providers own their work."""
+"""Renewable dashboard access, separate from the lifetime of the BT session."""
 
 from __future__ import annotations
 
@@ -31,6 +31,7 @@ class Lifetime:
 
     def open(self):
         with self.lock:
+            self.owner.activate_gateway()
             session_id = secrets.token_urlsafe(24)
             self.sessions[session_id] = {
                 "deadline": time.monotonic() + self.ttl,

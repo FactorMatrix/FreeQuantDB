@@ -78,6 +78,14 @@ class Owner:
         with self.lock:
             self.gateway_enabled = bool(enabled)
 
+    def activate_gateway(self):
+        with self.lock:
+            if self.closing:
+                raise FQDBError("The data worker has stopped")
+            # Start the native listener even when there are no local packages.
+            self.engine
+            self.seeding.start_auto()
+
     def has_work(self):
         with self.lock:
             return self.seeding.has_work() or self.transfers.has_work() or self.jobs.has_work()
@@ -114,7 +122,9 @@ class Owner:
             self._engine.poll()
         if self.closing:
             return
-        self.subscriptions.schedule(subscriptions=self.gateway_enabled or self.seeding.enabled)
+        self.subscriptions.schedule(
+            subscriptions=self.gateway_enabled or (self.seeding.enabled and not self.seeding.automatic)
+        )
         if self._engine is None and not (self.seeding.has_work() or self.transfers.has_work()):
             return
         self.transfers.tick(self.config.read())

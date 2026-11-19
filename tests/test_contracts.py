@@ -14,6 +14,7 @@ from fqdb.util import FQDBError, safe_path
 from fqdb.validation.coverage import coverage
 from fqdb.validation.files import inspect_file, passed
 from fqdb.validation.quality import validate
+from gateway_helpers import loopback_config
 
 DAYS = ["2026-11-12", "2026-11-13", "2026-11-16"]
 STOCK = ["000100.SZ", "600000.SH"]
@@ -36,7 +37,7 @@ def sample_frame(asset="stock", days=None, *, frequency="1d", **options):
 
 
 def setup_store(root, asset="stock"):
-    cfg = Config(root).ensure()
+    cfg = loopback_config(root)
     store = Store(cfg.root)
     schema = sample_schema(asset)
     store.register(schema)

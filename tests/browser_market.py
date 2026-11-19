@@ -13,11 +13,11 @@ import pyarrow.parquet as pq
 from playwright.sync_api import expect, sync_playwright
 
 from fqdb.catalog.magnet_manifest import SCHEMA_VERSION, dataset_path, package_path
-from fqdb.config import Config
 from fqdb.demo import market_frame, market_schema
 from fqdb.publish.publisher import Publisher
 from fqdb.schema.market import market_fields
 from fqdb.service.client import Client
+from gateway_helpers import loopback_config
 from fqdb.storage.metadata import Store
 from fqdb.util import atomic_json
 
@@ -47,7 +47,7 @@ def package(first, last, size, magnet=None):
 def prepare(root):
     client_root = root / "SYNTHETIC-client"
     mirror = root / "SYNTHETIC-mirror"
-    config = Config(client_root).ensure()
+    config = loopback_config(client_root)
     config.update(sources=[str(mirror)])
     store = Store(client_root)
     days = ["2026-11-17"]

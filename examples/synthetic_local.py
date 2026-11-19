@@ -1,7 +1,7 @@
 """Explicit synthetic six-dataset example, requiring a new independent root.
 
 python examples/synthetic_local.py -d /path/to/SYNTHETIC-demo
-No real source request, public announce, remote publication or automatic provider.
+No real source request, public announce or remote publication.
 """
 
 import argparse
@@ -24,6 +24,7 @@ root = args.data_dir.expanduser().resolve()
 if root.exists() and any(root.iterdir()):
     raise SystemExit("Use a new empty SYNTHETIC data root; existing data is never overwritten")
 client = Client(root)
+client.config.ensure().update(listen="127.0.0.1:0", discovery=False)
 days = ["2026-11-13", "2026-11-17"]
 outputs = []
 for asset in ("stock", "etf", "future"):

@@ -53,7 +53,7 @@ def test_explicit_cli_listener_binds_and_cannot_change_during_native_session(dat
 
         rejected = cli("start", "--listen", "127.0.0.1:0")
         assert rejected.returncode != 0
-        assert "Stop active BT work before changing the listen address" in rejected.stderr
+        assert "Stop active BitTorrent work before changing listen or discovery" in rejected.stderr
         current = client.get("/api/status")
         assert current["provider"] is True
         assert current["listen_port"] == port

@@ -16,6 +16,7 @@ from fqdb.schema.market import arrow_schema, market_fields
 from fqdb.service.client import Client
 from fqdb.storage.metadata import Store
 from fqdb.util import sha256
+from gateway_helpers import loopback_config
 from magnet_helpers import mirror
 
 
@@ -39,6 +40,7 @@ def test_six_formats_independent_day_month_year_bt_and_offline_queries(data_root
     originals = {}
     try:
         for client in clients:
+            loopback_config(client.config.root)
             client.config.update(peer_timeout=15, max_retries=0, max_active=6)
             client.ensure()
         for asset, target in (
