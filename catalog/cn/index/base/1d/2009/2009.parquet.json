@@ -1,0 +1,9 @@
+{
+  "start_date": "2009-01-01",
+  "end_date": "2009-12-31",
+  "rows": 713774,
+  "instruments": 3035,
+  "trading_days": 261,
+  "size_bytes": 26812182,
+  "magnet": "magnet:?xt=urn:btih:391c0b8549eb0676fd222961f6cd2d62b9769a80&dn=2009.parquet"
+}

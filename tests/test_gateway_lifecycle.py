@@ -65,6 +65,7 @@ def test_passive_sdk_and_finite_configuration_do_not_start_native_or_service(dat
         "cn/stock/base",
         "cn/etf/base",
         "cn/lof/base",
+        "cn/index/base",
         "cn/future/base",
     }
     assert fqdb.tasks() == []

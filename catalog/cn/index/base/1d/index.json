@@ -1,0 +1,17 @@
+{
+  "schema_version": 5,
+  "name": "cn/index/base",
+  "fields": [
+    "instrument",
+    "trading_date",
+    "open",
+    "high",
+    "low",
+    "close",
+    "volume",
+    "amount",
+    "prev_close"
+  ],
+  "instrument_column": "instrument",
+  "time_column": "trading_date"
+}

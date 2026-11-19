@@ -30,6 +30,8 @@ data/cn/stock/base/1d/2005/2005.parquet
 
 期货 `instrument` 包含合约代码和交易所后缀。大商所 `L`、`PP` 和 `V` 的月均价合约保留代码中的 `F`，例如 `L2602F.DCE`。[期货日线字段口径](../catalog/cn/future/base/1d/README.md)
 
+指数日线的量价字段保留各指数的口径，`close` 是必填的正数点位。开、高、低、前收盘参考点位和量额缺失时以 Parquet 空值表示。指数代码可使用 `.INDX` 命名空间。[指数日线覆盖与字段](../catalog/cn/index/base/1d/README.md)
+
 ## 下载与核对
 
 官方磁力说明可同步到本机，也可从同结构的镜像或本地文件导入。下载完成采用 BitTorrent 分片校验结果。包说明和实际文件可在看板中核对，或用 `fqdb catalog check` 比较预期与实测值。[数据下载](../catalog/README.md)

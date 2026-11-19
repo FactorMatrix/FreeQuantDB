@@ -1,4 +1,4 @@
-"""Registered markets and their asset, exchange, symbol and unit rules."""
+"""Registered markets and their asset, symbol, unit and availability rules."""
 
 from dataclasses import dataclass, field
 import re
@@ -7,6 +7,7 @@ from ..util import FQDBError
 
 DEFAULT_MARKET = "cn"
 DEFAULT_DATASET = f"{DEFAULT_MARKET}/stock/base"
+FREQUENCIES = ("1d", "1m")
 _SEGMENT = r"[a-z][a-z0-9_-]*"
 _DATASET_ID = re.compile(rf"{_SEGMENT}/{_SEGMENT}/{_SEGMENT}")
 
@@ -19,6 +20,10 @@ class AssetContract:
     price_units: tuple[str, ...]
     data_types: tuple[str, ...] = ("base",)
     exchange_patterns: dict[str, re.Pattern[str]] = field(default_factory=dict)
+    frequencies: tuple[str, ...] = FREQUENCIES
+    nullable_fields: tuple[str, ...] = ()
+    positive_fields: tuple[str, ...] = ()
+    amount_units: tuple[str, ...] = ()
 
     @property
     def volume_unit(self):
@@ -38,11 +43,15 @@ class MarketContract:
 
 
 _SECURITY_CODE = re.compile(r"[0-9]{6}")
+_INDEX_CODE = re.compile(r"[A-Z0-9]{5,12}")
+_SH_INDEX_CODE = re.compile(r"[A-Z0-9]{6}")
 _DELIVERY_MONTH = r"[0-9]{2}(?:0[1-9]|1[0-2])"
 _FUTURE_CODE = re.compile(rf"[A-Z]+{_DELIVERY_MONTH}")
 _DCE_FUTURE_CODE = re.compile(rf"{_FUTURE_CODE.pattern}|(?:L|PP|V){_DELIVERY_MONTH}F")
 _SHARE_UNITS = ("shares", "股")
 _CNY = ("CNY", "元")
+_POINTS = ("points", "点")
+_REPORTED = ("reported",)
 MARKET_CONTRACTS = {
     "cn": MarketContract(
         "Asia/Shanghai",
@@ -51,11 +60,22 @@ MARKET_CONTRACTS = {
             "stock": AssetContract(("SZ", "SH", "BJ"), _SECURITY_CODE, _SHARE_UNITS, _CNY),
             "etf": AssetContract(("SZ", "SH"), _SECURITY_CODE, _SHARE_UNITS, _CNY),
             "lof": AssetContract(("SZ", "SH"), _SECURITY_CODE, _SHARE_UNITS, _CNY),
+            "index": AssetContract(
+                ("SH", "SZ", "BJ", "INDX"),
+                _SECURITY_CODE,
+                _REPORTED,
+                _POINTS,
+                exchange_patterns={"SH": _SH_INDEX_CODE, "INDX": _INDEX_CODE},
+                frequencies=("1d",),
+                nullable_fields=("open", "high", "low", "volume", "amount", "prev_close"),
+                positive_fields=("open", "high", "low", "close", "prev_close"),
+                amount_units=_REPORTED,
+            ),
             "future": AssetContract(
                 ("SHFE", "DCE", "CZCE", "CFFEX", "INE", "GFEX"),
                 _FUTURE_CODE,
                 ("contracts", "lots", "手", "张"),
-                (*_CNY, "points", "点"),
+                (*_CNY, *_POINTS),
                 exchange_patterns={"DCE": _DCE_FUTURE_CODE},
             ),
         },

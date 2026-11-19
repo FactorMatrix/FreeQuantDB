@@ -47,14 +47,14 @@ class Dataset:
                 day(d)
 
     def _validate_market(self):
-        from .market import FREQUENCIES, market_fields, market_primary_key
+        from .market import market_fields, market_primary_key
 
-        dataset_contract(self.id)
+        contract = dataset_contract(self.id)
         timezone = market_contract(self.market).timezone
         if self.timezone != timezone:
             raise FQDBError(f"Market dataset {self.id} requires timezone {timezone}")
-        if any(f not in FREQUENCIES for f in self.frequencies):
-            raise FQDBError("Market format 2 currently supports only 1d and 1m")
+        if any(f not in contract.frequencies for f in self.frequencies):
+            raise FQDBError(f"Market dataset {self.id} supports frequencies {', '.join(contract.frequencies)}")
         current = self.active_frequency or ("1d" if "trading_date" in self.fields else "1m")
         if current not in self.frequencies:
             raise FQDBError("Concrete schema frequency is not declared")

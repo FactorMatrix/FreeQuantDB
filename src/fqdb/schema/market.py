@@ -7,7 +7,6 @@ import pyarrow as pa
 from ..util import FQDBError
 from .assets import DEFAULT_MARKET, asset_contract
 
-FREQUENCIES = ("1d", "1m")
 VALUES = ("open", "high", "low", "close", "volume", "amount")
 DAILY_FIELDS = {
     "instrument": "string",
@@ -35,11 +34,11 @@ def market_primary_key(frequency):
 
 
 def validate_instrument(value, asset, *, market=DEFAULT_MARKET):
-    """Validate an already mapped code; never guess or convert an exchange."""
+    """Validate an identifier with its declared venue or index namespace."""
     if not isinstance(value, str):
         raise FQDBError(f"instrument must be a string, including leading zeroes: {value!r}")
     if not asset_contract(asset, market=market).accepts_symbol(value):
-        raise FQDBError(f"Invalid {asset} instrument or unconfirmed exchange: {value!r}")
+        raise FQDBError(f"Invalid {asset} instrument code or suffix: {value!r}")
     return value
 
 

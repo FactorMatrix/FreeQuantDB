@@ -115,7 +115,7 @@ def _market_errors(frame, schema, trading_date, trading_dates, check_units):
     if frame.empty:
         failures.append("empty market package")
     for column in schema.fields:
-        if frame[column].isna().any():
+        if column not in contract.nullable_fields and frame[column].isna().any():
             failures.append(f"missing required market field: {column}")
     if frame.duplicated(schema.primary_key).any():
         failures.append("duplicate primary key")
@@ -130,7 +130,8 @@ def _market_errors(frame, schema, trading_date, trading_dates, check_units):
         failures.append("units are not confirmed; declare verified volume and amount units before publishing")
     if schema.units.get("volume") not in contract.volume_units:
         failures.append(f"unknown or incompatible volume unit for {asset}: {schema.units.get('volume')!r}")
-    if schema.units.get("amount") not in market_contract(market).amount_units:
+    amount_units = contract.amount_units or market_contract(market).amount_units
+    if schema.units.get("amount") not in amount_units:
         failures.append(f"unknown amount unit: {schema.units.get('amount')!r}")
     if schema.units.get("price") not in contract.price_units:
         failures.append(f"unknown or incompatible price unit for {asset}: {schema.units.get('price')!r}")
@@ -138,6 +139,9 @@ def _market_errors(frame, schema, trading_date, trading_dates, check_units):
     for column in numeric:
         if not np.isfinite(frame[column].dropna()).all():
             failures.append(f"nonfinite value: {column}")
+    for column in contract.positive_fields:
+        if (frame[column].dropna() <= 0).any():
+            failures.append(f"nonpositive {column}")
     if (
         (frame.high < frame[["open", "close", "low"]].max(axis=1))
         | (frame.low > frame[["open", "close", "high"]].min(axis=1))

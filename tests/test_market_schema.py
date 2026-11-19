@@ -9,11 +9,15 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+from fastapi.testclient import TestClient
 
 from fqdb.demo import market_frame, market_schema
 from fqdb.config import Config
 from fqdb.catalog.magnet import MagnetCatalog
+from fqdb.catalog.models import Entry
+from fqdb.publish.catalog import export_public_catalog
 from fqdb.publish.publisher import Publisher
+from fqdb.query import load
 from fqdb.schema import Dataset, arrow_schema, base_dataset, market_fields, validate_instrument
 from fqdb.schema.assets import AssetContract, MARKET_CONTRACTS, MarketContract
 from fqdb.schema.market import DAILY_FIELDS, MINUTE_FIELDS
@@ -21,7 +25,9 @@ from fqdb.service.core import Owner
 from fqdb.storage.metadata import Store
 from fqdb.storage.query import get_price
 from fqdb.util import FQDBError
+from fqdb.validation.files import validate_parquet
 from fqdb.validation.quality import validate
+from fqdb.web.app import create_app
 
 FUTURES_EXTRA_COLUMNS = ("settlement", "prev_settlement", "open_interest", "limit_up", "limit_down")
 
@@ -107,6 +113,86 @@ def test_futures_daily_requires_settlement_fields_and_accepts_zero_records():
         validate(frame.assign(open_interest=-1.0), schema)
 
 
+def test_index_daily_nullable_values_through_catalog_planning_and_queries(data_root):
+    days = ["2025-12-26", "2025-12-27"]
+    symbol = "TST99999.INDX"
+    schema = market_schema("index", days=days, symbols=[symbol])
+    schema.calendars.clear()
+    schema.instruments.clear()
+    schema = Dataset(**json.loads(json.dumps(schema.to_dict(), sort_keys=True)))
+    assert list(schema.fields) == list(DAILY_FIELDS)
+    assert {key: schema.units[key] for key in ("price", "volume", "amount")} == {
+        "price": "points",
+        "volume": "reported",
+        "amount": "reported",
+    }
+    with pytest.raises(FQDBError, match="supports frequencies 1d"):
+        replace(schema, frequencies=["1d", "1m"])
+    with pytest.raises(FQDBError, match="Frequency not declared"):
+        schema.for_frequency("1m")
+
+    frame = market_frame("index", days=days, symbols=[symbol])
+    optional = ["open", "high", "low", "prev_close", "volume", "amount"]
+    frame.loc[1, optional] = float("nan")
+    owner = Owner(Config(data_root))
+    try:
+        owner.store.register(schema)
+        published = Publisher(owner.store).publish(schema.id, "1d", frame, granularity="year", period="2025")
+        entry = Entry(**published["entries"][0])
+        path = data_root / entry.file
+        assert entry.days == tuple(days) and not entry.complete
+        assert pq.read_schema(path) == arrow_schema(schema)
+        assert validate_parquet(path, entry, schema) == 2
+
+        catalog = data_root / "SYNTHETIC-index-catalog"
+        export_public_catalog(owner.store, catalog, dataset=schema.id, frequency="1d")
+        consumer = Owner(Config(data_root / "SYNTHETIC-index-consumer"))
+        try:
+            MagnetCatalog(consumer.store.root).sync(str(catalog))
+            year = consumer.catalogs.preview(schema.id, "1d", year=2025, granularity="year")
+            weekend = consumer.catalogs.preview(schema.id, "1d", start_date=days[-1], end_date=days[-1])
+            assert [item["entry"]["info_hash"] for item in year["items"]] == [entry.info_hash]
+            assert weekend["items"] == year["items"] and weekend["calendar"] == "pending"
+            remote = Entry(**year["items"][0]["entry"])
+            assert remote.sparse and validate_parquet(path, remote, base_dataset("index")) == 2
+        finally:
+            consumer.close()
+
+        result = load(schema.id, symbols=symbol, start=days[0], end=days[-1], data_dir=data_root)
+        assert result.close.tolist() == [10.5, 10.5]
+        assert result.loc[1, optional].isna().all()
+        app = create_app(owner, "synthetic-token")
+        owner.lifetime.open()
+        request = {"dataset": schema.id, "instruments": [symbol], "start_date": days[-1], "end_date": days[-1]}
+        with TestClient(app, base_url="http://127.0.0.1", headers={"Authorization": "Bearer synthetic-token"}) as api:
+            response = api.post("/api/query", json=request)
+        assert response.status_code == 200, response.text
+        record = response.json()["records"][0]
+        assert record["close"] == 10.5 and all(record[field] is None for field in optional)
+    finally:
+        owner.close()
+
+
+@pytest.mark.parametrize(
+    "change,message",
+    [
+        ({"close": float("nan")}, "missing required market field: close"),
+        ({"open": 0.0}, "nonpositive open"),
+        ({"low": 0.0}, "nonpositive low"),
+        ({"high": 0.0}, "nonpositive high"),
+        ({"close": -1.0}, "nonpositive close"),
+        ({"prev_close": 0.0}, "nonpositive prev_close"),
+        ({"open": float("inf")}, "nonfinite value: open"),
+        ({"high": 5.0, "open": float("nan"), "low": float("nan")}, "invalid OHLC range"),
+        ({"volume": -1.0}, "negative volume"),
+        ({"amount": -1.0}, "negative amount"),
+    ],
+)
+def test_index_rejects_invalid_observations(change, message):
+    with pytest.raises(FQDBError, match=message):
+        validate(market_frame("index").assign(**change), market_schema("index"))
+
+
 def test_market_registry_isolates_paths_catalog_and_queries(data_root, monkeypatch):
     usa_stock = AssetContract(("XNYS",), re.compile(r"[A-Z]+"), ("shares",), ("USD",))
     monkeypatch.setitem(
@@ -144,6 +230,12 @@ def test_market_registry_isolates_paths_catalog_and_queries(data_root, monkeypat
         ("510300.SH", "etf"),
         ("160999.SZ", "lof"),
         ("501999.SH", "lof"),
+        ("Z9ZZ99.SH", "index"),
+        ("987654.SZ", "index"),
+        ("987654.BJ", "index"),
+        ("TST99999.INDX", "index"),
+        ("987654ZZZ01.INDX", "index"),
+        ("987654ZZZ001.INDX", "index"),
         ("RB2701.SHFE", "future"),
         ("I2701.DCE", "future"),
         ("L2701F.DCE", "future"),
@@ -176,6 +268,12 @@ def test_explicit_instrument_suffixes(value, asset):
         ("L2713F.DCE", "future"),
         ("160999.BJ", "lof"),
         ("16099.SZ", "lof"),
+        ("ZZ9999.UNKNOWN", "index"),
+        ("Z9ZZ99.SZ", "index"),
+        ("Z9ZZ99.IND", "index"),
+        ("0050.INDX", "index"),
+        ("TST99999.indx", "index"),
+        ("987654-ZZ901.INDX", "index"),
     ],
 )
 def test_unknown_or_ambiguous_instruments_are_not_guessed(value, asset):

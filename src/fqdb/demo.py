@@ -13,6 +13,7 @@ MARKET_SYMBOLS = {
     "stock": ("000100.SZ", "600000.SH", "430047.BJ"),
     "etf": ("510300.SH", "159915.SZ"),
     "lof": ("160999.SZ", "501999.SH"),
+    "index": ("Z9ZZ99.SH", "TST99999.INDX"),
     "future": ("RB2701.SHFE", "I2701.DCE", "TA2701.CZCE", "IF2701.CFFEX"),
 }
 

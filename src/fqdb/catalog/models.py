@@ -175,9 +175,9 @@ class Entry:
                 ".json"
             )
         else:
-            dataset_contract(self.dataset)
-            if self.frequency not in ("1d", "1m"):
-                raise FQDBError("Market package frequency must be 1d or 1m")
+            contract = dataset_contract(self.dataset)
+            if self.frequency not in contract.frequencies:
+                raise FQDBError(f"Unsupported market package frequency for {self.dataset}: {self.frequency}")
             expected = "data/" + market_relative(self.dataset, self.frequency, self.period_kind, self.period)
         if self.file != expected or type(self.version) is not int or self.version < 1:
             raise FQDBError("Invalid immutable file identity or manifest version")

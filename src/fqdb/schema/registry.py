@@ -1,6 +1,6 @@
 from .base import Dataset
 from .assets import DEFAULT_MARKET, MARKET_CONTRACTS, asset_contract, market_contract
-from .market import FREQUENCIES, market_fields, market_primary_key
+from .market import market_fields, market_primary_key
 
 
 def base_dataset(asset="stock", *, market=DEFAULT_MARKET):
@@ -8,9 +8,9 @@ def base_dataset(asset="stock", *, market=DEFAULT_MARKET):
     contract = asset_contract(asset, market=market)
     return Dataset(
         id=f"{market}/{asset}/base",
-        frequencies=list(FREQUENCIES),
+        frequencies=list(contract.frequencies),
         fields=market_fields("1d", asset=asset),
-        frequency_fields={f: market_fields(f, asset=asset) for f in FREQUENCIES},
+        frequency_fields={f: market_fields(f, asset=asset) for f in contract.frequencies},
         primary_key=market_primary_key("1d"),
         timezone=market_info.timezone,
         source="No real provider configured",
@@ -18,9 +18,9 @@ def base_dataset(asset="stock", *, market=DEFAULT_MARKET):
         synthetic=False,
         format_version=2,
         units={
-            "price": market_info.amount_units[0],
+            "price": contract.price_units[0],
             "volume": contract.volume_unit,
-            "amount": market_info.amount_units[0],
+            "amount": (contract.amount_units or market_info.amount_units)[0],
             "prev_close": "unadjusted source previous close; basis must be verified",
         },
         units_confirmed=False,
