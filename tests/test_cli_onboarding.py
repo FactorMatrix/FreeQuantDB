@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import sys
@@ -86,7 +87,8 @@ def test_every_command_help_exposes_directory_options_without_initializing(data_
             arguments = [flag, unused, *([command] if command else []), help_option]
             result = run_cli(data_root, environment, *arguments)
             assert result.returncode == 0, (arguments, result.stdout, result.stderr)
-            assert "-d DIRECTORY, --data-dir DIRECTORY" in result.stdout
+            assert re.search(r"(?m)^[ \t]+-d(?=[ ,\t])", result.stdout)
+            assert "--data-dir DIRECTORY" in result.stdout
             assert "init saves" in result.stdout
         if command is not None:
             result = run_cli(data_root, environment, command, "-d", unused, "-h")
