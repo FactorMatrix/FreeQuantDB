@@ -217,12 +217,6 @@ def test_provider_run_without_options_preserves_saved_advanced_settings(data_roo
         status = client.get("/api/status")
         assert {name: status["settings"][name] for name in settings} == settings
         assert status["provider_parent_pid"] == process.pid
-        deadline = time.monotonic() + 5
-        while "Ctrl+C" not in output.read_text() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        first_line = output.read_text().splitlines()[0]
-        assert "Ctrl+C 停止" in first_line
-        assert "正在检查本地数据" in first_line or "可提供 1 个数据包，等待连接" in first_line
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
             provision = client.get("/api/status")["provision"]
@@ -230,9 +224,10 @@ def test_provider_run_without_options_preserves_saved_advanced_settings(data_roo
                 break
             time.sleep(0.1)
         assert provision["status"] == "waiting_peers" and provision["eligible"] == 1
+        assert output.read_text() == ""
         process.send_signal(signal.SIGINT)
         assert process.wait(timeout=20) == 0, output.read_text()
-        finished = json.loads(output.read_text().split("\n", 1)[1])
+        finished = json.loads(output.read_text())
         assert finished["provider"] is False and finished["provision"]["status"] == "stopped"
         assert "datasets" not in finished and "settings" not in finished
         deadline = time.monotonic() + 15

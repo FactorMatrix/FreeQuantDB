@@ -34,9 +34,7 @@ def run(datasets=None, upload_limit=None, *, data_dir=None, **scope):
     parent_pid = os.getpid()
     result = start(datasets, upload_limit, parent_pid=parent_pid, **scope)
     if not result["provider"]:
-        print(result["provision"]["message"], flush=True)
         return result | {"enabled": False}
-    print(f"FQDB provider: {result['provision']['message']} Ctrl+C 停止。", flush=True)
     try:
         while client.endpoint() is not None:
             status = client.get("/api/status")

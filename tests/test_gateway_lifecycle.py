@@ -381,6 +381,9 @@ def test_gateway_cli_ctrl_c_closes_web_and_keeps_seed_worker(data_root):
         process.send_signal(signal.SIGINT)
         stdout, stderr = process.communicate(timeout=20)
         assert process.returncode == 0, stdout + stderr
+        lines = stdout.splitlines()
+        assert len(lines) == 1 and lines[0].startswith(f"FQDB gateway: {endpoint['url']}/?session=")
+        assert stderr == ""
         assert client.endpoint()["pid"] == endpoint["pid"]
         assert client.get("/api/status")["provider"]
         with httpx.Client(trust_env=False, timeout=3) as http:
