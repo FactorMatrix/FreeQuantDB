@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .config import Config, select_root
 from .service.client import Client
+from .service.subscriptions import DEFAULT_INTERVAL
 from .storage.metadata import Store
 from .storage.query import get_price as query_price
 
@@ -87,10 +88,17 @@ def add_source(source):
     return client().call("source", {"source": str(source)})
 
 
-def subscribe(dataset, frequency="1d", *, interval=86400, download=False, **options):
+def subscribe(dataset=None, frequency=None, *, interval=DEFAULT_INTERVAL, download=False, **options):
+    """Save a catalog check or opt into downloading packages after Gateway starts."""
     return client().call(
         "subscribe",
-        {"dataset": dataset, "frequency": frequency, "interval": interval, "download": download, **options},
+        {
+            "dataset": dataset,
+            "frequency": frequency or ("1d" if dataset else None),
+            "interval": interval,
+            "download": download,
+            **options,
+        },
     )
 
 

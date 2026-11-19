@@ -61,9 +61,10 @@ const taskTable = (tasks) =>
         title: "交易日 / 数据包",
         render: (r) => {
           const name = esc(packagePeriod(r)) + " · " + packageKind(r);
-          return r.catalog_path
+          const link = r.catalog_path
             ? `<button class="text-link" data-package="${esc(r.catalog_path)}">${name}</button>`
             : name;
+          return link + (r.origin === "subscription" ? '<span class="cell-sub">订阅下载</span>' : "");
         }
       },
       { title: "状态", render: (r) => statusText(r.status) },
@@ -125,6 +126,9 @@ export async function downloads(ctx) {
       ? String(preset.month).padStart(2, "0")
       : end.slice(5, 7);
   const plannerOpen = !!preset || (ctx.state.downloadPlannerOpen ?? true);
+  const focusSubscriptions = ctx.state.focusTransferSubscriptions;
+  ctx.state.focusTransferSubscriptions = false;
+  const settingsOpen = focusSubscriptions || ctx.state.transferSettingsOpen;
   const filters = `<select id="task-status" aria-label="任务状态筛选">${options(
     taskFilters.map((k) => [k, taskLabel(k)]),
     ctx.state.taskStatus,
@@ -179,8 +183,8 @@ export async function downloads(ctx) {
         </div>
       </details>
     </div>
-    <details class="panel ops-transfer-settings" id="transfer-settings">
-      <summary class="panel-header"><h2>传输设置</h2></summary>
+    <details class="panel ops-transfer-settings" id="transfer-settings" ${settingsOpen ? "open" : ""}>
+      <summary class="panel-header"><h2>传输设置</h2><span class="panel-meta">共享、限速与自动更新</span></summary>
       <div class="panel-body" id="transfer-settings-content"></div>
     </details>`;
   const settings = $("#transfer-settings");
@@ -205,6 +209,7 @@ export async function downloads(ctx) {
     }
   }
   settings.ontoggle = () => {
+    ctx.state.transferSettingsOpen = settings.open;
     if (settings.open) ctx.run(updateSettings);
   };
   bindScope(ctx, "download");
@@ -374,6 +379,7 @@ export async function downloads(ctx) {
             ...g,
             month: key,
             total: 0,
+            subscription_tasks: 0,
             size: 0,
             weighted: 0,
             weight: 0,
@@ -381,6 +387,7 @@ export async function downloads(ctx) {
             counts: {},
           });
         x.total += g.total;
+        x.subscription_tasks += g.subscription_tasks;
         x.size = g.size == null || x.size == null ? null : x.size + g.size;
         const weight = Math.max(g.size || 0, 1);
         x.weighted += g.progress * weight;
@@ -401,7 +408,7 @@ export async function downloads(ctx) {
       ? shown
           .map(
             (g, i) =>
-              `<details class="task-group" data-task-group="${i}" ${ctx.state.openGroups?.includes(g.month) ? "open" : ""}><summary><span class="ops-group-period"><strong>${esc(g.month.replace("-", " 年 ")) + (g.month.includes("-") ? " 月" : " 年")}</strong><small>${num(g.total)} 个文件 · ${bytes(g.size)}</small></span>${progress(g.progress)}<span class="ops-group-states">${Object.entries(
+              `<details class="task-group" data-task-group="${i}" ${ctx.state.openGroups?.includes(g.month) ? "open" : ""}><summary><span class="ops-group-period"><strong>${esc(g.month.replace("-", " 年 ")) + (g.month.includes("-") ? " 月" : " 年")}</strong><small>${num(g.total)} 个文件 · ${bytes(g.size)}${g.subscription_tasks ? ` · ${num(g.subscription_tasks)} 个订阅下载` : ""}</small></span>${progress(g.progress)}<span class="ops-group-states">${Object.entries(
                 g.counts,
               )
                 .map(([s, n]) => statusText(s, `${taskLabel(s)} ${n}`))
@@ -449,5 +456,11 @@ export async function downloads(ctx) {
     });
   };
   await ctx.updateTasks();
+  if (settingsOpen) ctx.run(async () => {
+    await updateSettings();
+    if (focusSubscriptions) requestAnimationFrame(() => {
+      if (ctx.live() && settings.open) $("#subscription-settings-title", settings)?.focus();
+    });
+  });
   ctx.poll = () => Promise.all([ctx.updateTasks(), updateSettings()]);
 }

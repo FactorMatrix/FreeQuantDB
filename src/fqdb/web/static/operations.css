@@ -110,8 +110,26 @@
 .ops-provision > .panel {
   margin-bottom: 0;
 }
-.ops-transfer-settings #provider-issues {
+.ops-transfer-settings #provider-issues,
+.ops-transfer-settings #subscription-settings {
   margin: 14px 0 0;
+}
+#subscribe-form {
+  display: grid;
+  gap: 12px;
+  margin-top: 0;
+}
+#subscribe-form .action-row {
+  margin-top: 0;
+}
+.subscription-range small {
+  align-self: center;
+}
+.subscription-error {
+  color: var(--bad);
+  overflow-wrap: anywhere;
+  max-width: 32ch;
+  white-space: normal;
 }
 .ops-provider-state h2 {
   display: flex;

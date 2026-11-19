@@ -1,4 +1,5 @@
 import { $, esc, metric, num, reasonText, table } from "../ui.js";
+import { bindSubscriptions, subscriptionSettings } from "./subscriptions.js";
 
 const BYTES_PER_MB = 1_000_000;
 const provisionStates = {
@@ -56,6 +57,7 @@ export async function mountTransferSettings(ctx, view) {
         <p class="panel-note" id="priority-note">规则变更在节点重连后生效。</p>
       </section>
     </div>
+    ${subscriptionSettings}
     <section class="panel" id="provider-issues" hidden>
       <div class="panel-header"><h2>文件异常</h2><span id="provider-issue-count" class="panel-meta"></span></div>
       <div id="provider-issue-list"></div>
@@ -72,10 +74,12 @@ export async function mountTransferSettings(ctx, view) {
   let toggling = false;
   let editingLimit = false;
   let lastRules;
+  const paintSubscriptions = bindSubscriptions(ctx, view, refresh);
 
   function paint(current) {
     if (!ctx.live()) return;
     const { provision, settings } = current;
+    paintSubscriptions(current.subscriptions);
     enabled = current.provider;
     const paused = !enabled && settings.auto_seed === false;
     $("#provider-state", view).textContent = enabled

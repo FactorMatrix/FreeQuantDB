@@ -38,14 +38,15 @@ class Transfers:
         self.preparation_jobs = {}
         self.last_peer_connect = 0
 
-    def activate(self, task_ids):
-        """Authorize only the downloads selected by an explicit user action."""
+    def activate(self, task_ids, *, queued=False):
+        """Authorize downloads selected directly or through a saved subscription."""
         with self.lock:
             selected = set(task_ids)
-            for identity in selected - self._authorized:
-                task = self.store.task(identity)
-                if task and task["status"] in ACTIVE_STATES:
-                    self.store.set_task(identity, status="queued", reason="explicit_restart_resume")
+            if not queued:
+                for identity in selected - self._authorized:
+                    task = self.store.task(identity)
+                    if task and task["status"] in ACTIVE_STATES:
+                        self.store.set_task(identity, status="queued", reason="explicit_restart_resume")
             self._authorized.update(selected)
 
     def task_state(self, task):
@@ -128,7 +129,9 @@ class Transfers:
         self._authorized.discard(identity)
         if self.owner.seeding.wants_seed(entry):
             try:
-                self.owner.engine.promote(identity, source, resolve_file(self.config.root, entry, immutable=True))
+                self.owner.engine.promote(
+                    identity, source, resolve_file(self.config.root, entry, immutable=True)
+                )
                 return
             except Exception:
                 # The complete local data can be restored from its final path.

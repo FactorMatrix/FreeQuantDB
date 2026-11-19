@@ -3,14 +3,16 @@
 from functools import partial
 
 from .. import jobs
+from ..service.subscriptions import DEFAULT_INTERVAL
 
 
-def _scope_args(parser, *, period=True):
-    parser.add_argument("dataset", help="Market-qualified dataset such as cn/stock/base")
-    parser.add_argument("--frequency", default="1d")
+def _scope_args(parser, *, subscription=False):
+    dataset = {"nargs": "?"} if subscription else {}
+    parser.add_argument("dataset", help="Market-qualified dataset such as cn/stock/base", **dataset)
+    parser.add_argument("--frequency", default=None if subscription else "1d")
     parser.add_argument("--start-date")
     parser.add_argument("--end-date")
-    if period:
+    if not subscription:
         parser.add_argument("--year", type=int)
         parser.add_argument("--month", type=int)
 
@@ -77,13 +79,20 @@ def register(cli):
     update = cli.add("update", "Refresh the local magnet catalog", partial(_action, action="update"))
     update.add_argument("--source", help="An alternative mirror with the same catalog layout")
     subscribe = cli.add(
-        "subscribe", "Configure catalog checks during an active session", partial(_action, action="subscribe")
+        "subscribe",
+        "Schedule catalog checks and optional downloads after Gateway starts",
+        partial(_action, action="subscribe"),
     )
-    _scope_args(subscribe, period=False)
+    _scope_args(subscribe, subscription=True)
     _package_options(subscribe)
-    subscribe.add_argument("--interval", type=int, default=86400)
+    subscribe.add_argument(
+        "--interval", type=int, default=DEFAULT_INTERVAL, help="Seconds between checks (default: %(default)s)"
+    )
     subscribe.add_argument("--at")
     subscribe.add_argument("--timezone", default="UTC")
+    subscribe.add_argument(
+        "--download", action="store_true", help="Automatically download new packages in the selected scope"
+    )
     task = cli.add(
         "task", "Pause, resume, cancel or retry a selected download", partial(_action, action="task")
     )

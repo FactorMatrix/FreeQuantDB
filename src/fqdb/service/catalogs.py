@@ -1,12 +1,18 @@
 """Connect the file catalog to explicit download and refresh operations."""
 
+from bisect import bisect_left, bisect_right
 from calendar import monthrange
+from collections import defaultdict
 from dataclasses import replace
 from datetime import date
 
 from ..catalog.magnet import OFFICIAL_SOURCE, MagnetCatalog
 from ..catalog.models import Entry
+from ..storage.market import local_sparse_dates
 from ..util import FQDBError, day, now, safe_path
+from ..validation.coverage import dates
+from ..validation.files import inspect_file_stat
+from .transfers import WORK_STATES
 
 
 def scope_bounds(start_date=None, end_date=None, year=None, month=None):
@@ -29,7 +35,7 @@ def scope_bounds(start_date=None, end_date=None, year=None, month=None):
 
 def select_periods(packages, first, last):
     """Prefer canonical archive packages over overlapping smaller packages."""
-    selected = []
+    selected = defaultdict(list)
     kind_order = {"year": 0, "month": 1, "day": 2}
 
     def priority(item):
@@ -38,10 +44,38 @@ def select_periods(packages, first, last):
 
     for package in sorted(packages, key=priority):
         lower, upper = max(package["start_date"], first or ""), min(package["end_date"], last or "9999-12-31")
-        if any(start <= lower <= upper <= end for start, end, _ in selected):
+        year = package["period"][:4]
+        if any(start <= lower <= upper <= end for start, end, _ in selected[year]):
             continue
-        selected.append((lower, upper, package))
-    return [package for _, _, package in sorted(selected, key=lambda result: result[:2])]
+        selected[year].append((lower, upper, package))
+    rows = (item for group in selected.values() for item in group)
+    return [package for _, _, package in sorted(rows, key=lambda result: result[:2])]
+
+
+def preferred_packages(candidates, *, granularity=None, year=None, month=None, allow_daily_fallback=False):
+    preferred_kind = "month" if month else "year" if year else "day"
+    expected = granularity or (preferred_kind if allow_daily_fallback else "auto")
+    if expected not in ("auto", "day", "month", "year") or type(allow_daily_fallback) is not bool:
+        raise FQDBError("Invalid download granularity or daily fallback option")
+    preferred = [item for item in candidates if expected in ("auto", item["period_kind"])]
+    fallback = expected in ("month", "year") and not preferred
+    if fallback and allow_daily_fallback:
+        preferred = [item for item in candidates if item["period_kind"] == "day"]
+    return preferred, expected, fallback
+
+
+def _package_options(body):
+    return {key: body[key] for key in ("granularity", "year", "month", "allow_daily_fallback") if key in body}
+
+
+def _package_dates(package, first, last, calendar):
+    start, end = package["start_date"], package["end_date"]
+    possible = dates(max(start, first or start), min(end, last or end))
+    if calendar and calendar[0] <= start <= end <= calendar[-1]:
+        sessions = calendar[bisect_left(calendar, start) : bisect_right(calendar, end)]
+        if len(sessions) == package["trading_days"]:
+            return {d for d in sessions if (not first or first <= d) and (not last or d <= last)}
+    return set(possible)
 
 
 class Catalogs:
@@ -49,12 +83,23 @@ class Catalogs:
         self.owner, self.store, self.config = owner, owner.store, owner.config
         self.catalog = MagnetCatalog(self.store.root)
 
+    def _current_file(self, package, evidence):
+        if not evidence or package["local_status"] != "available" or evidence[0] != package.get("info_hash"):
+            return False
+        try:
+            stat = safe_path(self.store.root, package["file"]).stat()
+        except FileNotFoundError:
+            return False
+        return (stat.st_size, stat.st_mtime_ns) == evidence[1:]
+
     def inspect(self, *, deep=False, catalog_path=None, scope=None):
         scanned = self.catalog.scan(deep=deep, path=catalog_path, scope=scope)
         if not scanned["packages"]:
             return scanned
         selected = scanned["datasets"][0] if scope is not None or catalog_path is not None else None
-        active = self.store.active_file_evidence((selected["dataset"], selected["frequency"]) if selected else None)
+        active = self.store.active_file_evidence(
+            (selected["dataset"], selected["frequency"]) if selected else None
+        )
         identities = {package.get("info_hash") for package in scanned["packages"]} - {None}
         task_rows = self.store.tasks() if identities else ()
         tasks = {
@@ -73,14 +118,8 @@ class Catalogs:
                     # The file on disk belongs to the previously installed package.
                     package["local_status"] = "new_version"
                     package["version_status"] = "new_version"
-                elif package["local_status"] == "available":
-                    path = safe_path(self.store.root, package["file"])
-                    try:
-                        stat = path.stat()
-                    except FileNotFoundError:
-                        continue
-                    if (stat.st_size, stat.st_mtime_ns) == previous[1:]:
-                        package["version_status"] = "current"
+                elif self._current_file(package, previous):
+                    package["version_status"] = "current"
         return scanned
 
     def _package(self, path, *, deep=False):
@@ -134,10 +173,6 @@ class Catalogs:
         allow_daily_fallback=False,
     ):
         first, last = scope_bounds(start_date, end_date, year, month)
-        preferred_kind = "month" if month else "year" if year else "day"
-        expected = granularity or (preferred_kind if allow_daily_fallback else "auto")
-        if expected not in ("auto", "day", "month", "year") or type(allow_daily_fallback) is not bool:
-            raise FQDBError("Invalid download granularity or daily fallback option")
         snapshot = self.inspect()
         candidates = [
             item
@@ -149,10 +184,13 @@ class Catalogs:
             and (not first or item["end_date"] >= first)
             and (not last or item["start_date"] <= last)
         ]
-        preferred = [item for item in candidates if expected in ("auto", item["period_kind"])]
-        fallback = expected in ("month", "year") and not preferred
-        if fallback and allow_daily_fallback:
-            preferred = [item for item in candidates if item["period_kind"] == "day"]
+        preferred, expected, fallback = preferred_packages(
+            candidates,
+            granularity=granularity,
+            year=year,
+            month=month,
+            allow_daily_fallback=allow_daily_fallback,
+        )
         items = [self._item(item) for item in select_periods(preferred, first, last)]
         schema = self.store.dataset(dataset, required=False)
         calendar = schema.calendars.get(frequency, []) if schema else []
@@ -195,6 +233,114 @@ class Catalogs:
                 ids.append(self.store.enqueue(entry, force=force))
             self.owner.transfers.activate(ids)
         return ids
+
+    def subscription_candidates(self, body, refreshed):
+        """Plan automatic enrollment from the same snapshot as the catalog check."""
+        dataset, frequency = body["dataset"], body["frequency"]
+        identity = f"{dataset}/{frequency}"
+        first, last = scope_bounds(*(body.get(key) for key in ("start_date", "end_date", "year", "month")))
+        packages = [
+            p
+            for p in refreshed["packages"]
+            if p["dataset"] == dataset
+            and p["frequency"] == frequency
+            and p["magnet_status"] == "available"
+            and (not first or p["end_date"] >= first)
+            and (not last or p["start_date"] <= last)
+        ]
+        observed = {p["path"]: p["info_hash"] for p in packages}
+        previous = self.store.subscription_packages(identity)
+        if previous == observed:
+            return [], None
+
+        preferred, _, _ = preferred_packages(packages, **_package_options(body))
+        selected = select_periods(preferred, first, last)
+        if not first and not last and selected:
+            if previous is not None:
+                selected = [p for p in selected if previous.get(p["path"]) != p["info_hash"]]
+            else:
+                added = set(refreshed["added"])
+                if packages and all(p["path"] in added for p in packages):
+                    latest = max(p["end_date"] for p in selected)
+                    selected = [p for p in selected if p["end_date"] == latest]
+                else:
+                    changed = added | set(refreshed["updated"])
+                    selected = [p for p in selected if p["path"] in changed]
+        if not selected:
+            return [], observed
+
+        matches = self._missing_subscription_packages(
+            dataset, frequency, selected, first, last, previous or {}
+        )
+        return [self._entry(package).validate(self.store.root) for package in matches], observed
+
+    def _missing_subscription_packages(self, dataset, frequency, selected, first, last, previous):
+        start = max(min(p["start_date"] for p in selected), first or "")
+        end = min(max(p["end_date"] for p in selected), last or "9999-12-31")
+        active = self.store.active(dataset, frequency, start, end)
+        if not active:
+            return selected
+
+        local = {e.file: e.info_hash for e, _ in active}
+        verified = []
+        for entry, evidence in active:
+            try:
+                stat = safe_path(self.store.root, entry.file).stat()
+            except FileNotFoundError:
+                continue
+            if inspect_file_stat(stat, entry, evidence)["file"] == "verified_cached":
+                verified.append((entry, evidence))
+        ready = {entry.info_hash for entry, _ in verified}
+        schema = self.store.dataset(dataset)
+        calendar = sorted(set(schema.calendars.get(frequency) or ()))
+        candidates = []
+        for package in selected:
+            identity = package["info_hash"]
+            if identity in ready:
+                continue
+            revision = (
+                local.get(package["file"], identity) != identity
+                or previous.get(package["path"], identity) != identity
+            )
+            candidates.append((package, None if revision else _package_dates(package, first, last, calendar)))
+
+        wanted = set().union(*(days for _, days in candidates if days is not None))
+        covered = set()
+        for entry, evidence in verified:
+            if entry.sparse:
+                if not any(d in wanted for d in dates(max(start, entry.start), min(end, entry.end))):
+                    continue
+                try:
+                    covered.update(local_sparse_dates(self.store, schema, frequency, [(entry, evidence)]))
+                except (OSError, ValueError):
+                    # Unreadable local dates cannot establish package coverage.
+                    continue
+            else:
+                covered.update(entry.days)
+        return [p for p, days in candidates if days is None or not days <= covered]
+
+    def enqueue_subscription(self, entries, identity):
+        with self.owner.lock:
+            tasks = self.store.enqueue_subscription(entries, identity)
+            self.owner.transfers.activate(tasks, queued=True)
+        return tasks
+
+    def resume_subscription(self, body):
+        """Recover this subscription's pending work after an explicit Gateway start."""
+        identity = f"{body['dataset']}/{body['frequency']}"
+        first, last = scope_bounds(*(body.get(key) for key in ("start_date", "end_date", "year", "month")))
+        tasks = self.store.subscription_tasks(identity, WORK_STATES)
+        _, expected, _ = preferred_packages([], **_package_options(body))
+        kinds = {expected, "day"} if body.get("allow_daily_fallback") else {expected}
+        self.owner.transfers.activate(
+            [
+                task["id"]
+                for task in tasks
+                if (not first or task["body"]["entry"]["end_date"] >= first)
+                and (not last or task["body"]["entry"]["start_date"] <= last)
+                and ("auto" in kinds or task["body"]["entry"]["period_kind"] in kinds)
+            ]
+        )
 
     def plan(self, scope, *, download=False):
         preview = self.preview(**scope)
@@ -275,7 +421,10 @@ class Catalogs:
         from ..publish.migrate import migrate_package
 
         with self.owner.storage_lock:
-            return migrate_package(self.store, source, dataset=dataset, frequency=frequency, period=period)
+            entry = migrate_package(self.store, source, dataset=dataset, frequency=frequency, period=period)
+        with self.owner.lock:
+            self.owner.seeding.storage_changed(entry["info_hash"])
+        return entry
 
     def scan(self, *, deep=False, progress=None):
         return self.inspect(deep=deep)

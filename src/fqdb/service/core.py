@@ -61,7 +61,8 @@ class Owner:
             "transfer_prepare": self.transfers.prepare,
         }
         self.jobs = Jobs(self.store, self.execute_job)
-        self.subscriptions = Subscriptions(self.store, self.jobs)
+        self.subscriptions = Subscriptions(self)
+        self.internal_jobs["subscription_check"] = self.subscriptions.check
 
     @property
     def engine(self):
@@ -83,10 +84,16 @@ class Owner:
             if self.closing:
                 raise FQDBError("The data worker has stopped")
             self.seeding.start_auto()
+            self.subscriptions.activate_gateway()
 
     def has_work(self):
         with self.lock:
-            return self.seeding.has_work() or self.transfers.has_work() or self.jobs.has_work()
+            return (
+                self.seeding.has_work()
+                or self.transfers.has_work()
+                or self.jobs.has_work()
+                or self.subscriptions.has_work()
+            )
 
     def start(self):
         self.thread.start()
@@ -119,11 +126,9 @@ class Owner:
     def tick(self):
         if self._engine is not None:
             self._engine.poll()
-        if self.closing:
+        if self.closing or getattr(self, "lifecycle_stopping", False):
             return
-        self.subscriptions.schedule(
-            subscriptions=self.gateway_enabled or (self.seeding.enabled and not self.seeding.automatic)
-        )
+        self.subscriptions.schedule(manual_provider=self.seeding.enabled and not self.seeding.automatic)
         if self._engine is None and not (
             self.gateway_enabled or self.seeding.has_work() or self.transfers.has_work()
         ):
@@ -138,11 +143,19 @@ class Owner:
 
     def publish(self, args, progress=None):
         with self.storage_lock:
-            return self.publisher.publish(**args, progress=progress)
+            result = self.publisher.publish(**args, progress=progress)
+        with self.lock:
+            for entry in result["entries"]:
+                self.seeding.storage_changed(entry["info_hash"])
+        return result
 
     def aggregate(self, args, progress=None):
         with self.storage_lock:
-            return self.publisher.aggregate(**args, progress=progress)
+            result = self.publisher.aggregate(**args, progress=progress)
+        with self.lock:
+            for entry in result["entries"]:
+                self.seeding.storage_changed(entry["info_hash"])
+        return result
 
     def dispatch(self, action, args):
         return dispatch(self, action, args)

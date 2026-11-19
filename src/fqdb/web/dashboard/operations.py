@@ -100,6 +100,7 @@ class OperationViews:
                     "frequency": group_frequency,
                     "month": group_month,
                     "total": len(items),
+                    "subscription_tasks": sum(item["origin"] == "subscription" for item in items),
                     "counts": dict(Counter(t["status"] for t in items)),
                     "progress": sum(t["progress"] * w for t, w in zip(items, weights)) / sum(weights),
                     "size": sum(t["size"] for t in items) if known_size else None,

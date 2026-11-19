@@ -1,16 +1,11 @@
-import { scopeControls, bindScope } from "../components/scope.js";
 import {
   $,
   $$,
   esc,
   num,
-  label,
   pill,
   table,
   jsonDetails,
-  datasetName,
-  human,
-  shortTime,
 } from "../ui.js";
 
 export async function settings(ctx) {
@@ -45,7 +40,6 @@ export async function settings(ctx) {
         "",
       )}<div class="full action-row"><button class="button button-primary">保存设置</button></div></form></div></section>
     <section class="panel" data-settings-section="nodes"><div class="panel-header"><h2>BT 节点</h2></div><div id="peer-nodes"></div><div class="panel-body"><form id="peer-node-form" class="form-grid"><label>节点 IP<input name="ip" required placeholder="IPv4 / IPv6"></label><label>端口<input name="port" type="number" min="1" max="65535" required></label><label>备注<input name="note" maxlength="240"></label><label>状态<select name="enabled"><option value="true">启用</option><option value="false">停用</option></select></label><div class="full action-row"><button class="button" id="peer-node-save">添加节点</button><button class="button" type="button" id="peer-node-reset" hidden>取消编辑</button></div></form></div></section>
-    <section class="panel" data-settings-section="subscriptions"><div class="panel-header"><h2>定时订阅</h2></div><div id="subscriptions"></div><div class="panel-body">${scopeControls(ctx, "subscription", true)}<form id="subscribe-form" class="form-grid"><label>触发方式<select name="schedule"><option value="interval">按间隔检查</option><option value="daily">每日定时检查</option></select></label><label id="subscribe-interval">间隔（秒）<input name="interval" type="number" min="10" value="3600"></label><label id="subscribe-at" hidden>每天时间<input name="at" type="time" step="60"></label><label id="subscribe-timezone" hidden>时区<input name="timezone" placeholder="IANA 时区，如 UTC"></label><label class="check full"><input name="download" type="checkbox">自动下载新日数据包</label><div class="full action-row"><button class="button button-primary" ${ctx.selection().dataset ? "" : "disabled"}>创建订阅</button><span class="muted">未勾选时仅检查目录</span></div></form></div></section>
     <section class="panel" data-settings-section="sources">
       <div class="panel-header"><h2>磁力目录源</h2></div>
       <div class="panel-body">
@@ -70,7 +64,6 @@ export async function settings(ctx) {
     </section>
     <section class="panel" data-settings-section="storage"><div class="panel-header"><h2>数据位置</h2></div><div class="panel-body"><dl class="facts"><div class="fact"><dt>数据根目录</dt><dd><code>${esc(r.data_dir)}</code></dd></div></dl><p class="panel-note">更换目录：停止服务后运行 <code>fqdb init --data-dir</code>。</p><button type="button" class="button" id="layout-preview">刷新目录信息</button><div id="layout-result"></div></div></section>
     <section class="panel" data-settings-section="advanced"><div class="panel-header"><h2>扩展与日志</h2><button id="logs" class="button">读取日志</button></div><div class="panel-body"><details class="advanced"><summary>注册数据集</summary><form id="register-form"><label>数据描述 JSON<textarea name="descriptor" rows="6" required placeholder="字段、主键、时区、来源、授权和规则"></textarea></label><div class="action-row"><button class="button">校验并注册</button></div></form></details><pre id="log-output" hidden></pre>${jsonDetails(cfg, "服务配置详情")}</div></section>`;
-  bindScope(ctx, "subscription", true);
   async function selectSettings(tab, snapshot) {
     ctx.state.settingsTab = tab;
     $$("[data-settings-tab]").forEach((b) => {
@@ -81,11 +74,15 @@ export async function settings(ctx) {
       panel.hidden = panel.dataset.settingsSection !== tab;
     });
     if (tab === "storage") await layoutInfo();
-    if (tab === "subscriptions") await subscriptions(snapshot);
     if (tab === "nodes") await nodes(snapshot?.settings.peer_nodes);
   }
   $$("[data-settings-tab]").forEach((b) => {
-    b.onclick = () => ctx.run(() => selectSettings(b.dataset.settingsTab));
+    b.onclick = () => {
+      if (b.dataset.settingsTab === "subscriptions") {
+        ctx.state.focusTransferSubscriptions = true;
+        ctx.navigate("downloads");
+      } else ctx.run(() => selectSettings(b.dataset.settingsTab));
+    };
   });
   async function layoutInfo() {
     const info = await ctx.api("layout");
@@ -108,86 +105,6 @@ export async function settings(ctx) {
     );
   }
   $("#layout-preview").onclick = () => ctx.run(layoutInfo);
-  async function subscriptions(snapshot) {
-    const data = snapshot ?? await ctx.api("settings");
-    if (!ctx.live()) return;
-    $("#subscriptions").innerHTML = table(
-      [
-        {
-          title: "数据范围",
-          render: (s) =>
-            `${esc(datasetName(s.body.dataset))}<span class="cell-sub">${esc(human(s.body.frequency))} · ${esc(s.body.start_date || "全部日期")} — ${esc(s.body.end_date || "最新已发布")}</span>`,
-        },
-        {
-          title: "触发与授权",
-          render: (s) =>
-            `${s.body.at ? `${esc(s.body.at)} · ${esc(s.body.timezone || "UTC")}` : num(s.body.interval || 3600) + " 秒"}<span class="cell-sub">${s.body.download ? "允许自动下载" : "仅刷新目录"}</span>`,
-        },
-        {
-          title: "状态",
-          render: (s) =>
-            pill(
-              s.body.running_job
-                ? "checking"
-                : s.body.enabled === false
-                  ? "paused"
-                  : "queued",
-              s.body.running_job
-                ? "后台检查中"
-                : s.body.enabled === false
-                  ? "已停用"
-                  : "等待计划",
-            ),
-        },
-        { title: "最近检查", render: (s) => shortTime(s.body.last_check) },
-        {
-          title: "最近异常",
-          render: (s) =>
-            s.body.last_error
-              ? `<span class="truncate" title="${esc(s.body.last_error)}">${esc(s.body.last_error)}</span>`
-              : "暂无异常记录",
-        },
-        {
-          title: "下次检查",
-          render: (s) =>
-            s.body.enabled === false
-              ? "已停用"
-              : s.next_run > 0
-                ? shortTime(s.next_run * 1000)
-                : "等待首次检查",
-        },
-        {
-          title: "操作",
-          render: (s) =>
-            `<div class="row-actions"><button class="text-link" data-subscription-toggle="${esc(s.id)}">${s.body.enabled === false ? "启用" : "停用"}</button><button class="text-link" data-unsubscribe="${esc(s.id)}">取消订阅</button></div>`,
-        },
-      ],
-      data.subscriptions,
-      "暂无订阅",
-    );
-    $$("[data-unsubscribe]").forEach(
-      (b) =>
-        (b.onclick = () =>
-          ctx.run(async () => {
-            await ctx.act("unsubscribe", { id: b.dataset.unsubscribe });
-            await subscriptions();
-          })),
-    );
-    $$("[data-subscription-toggle]").forEach(
-      (b) =>
-        (b.onclick = () =>
-          ctx.run(async () => {
-            const selected = data.subscriptions.find(
-              (s) => s.id === b.dataset.subscriptionToggle,
-            );
-            await ctx.act("subscribe", {
-              ...selected.body,
-              enabled: selected.body.enabled === false,
-            });
-            await subscriptions();
-          })),
-    );
-  }
   const nodeForm = $("#peer-node-form");
   let nodeRows = [];
   function resetNode() {
@@ -268,20 +185,6 @@ export async function settings(ctx) {
     });
   };
   $("#peer-node-reset").onclick = resetNode;
-  const subscriptionForm = $("#subscribe-form");
-  subscriptionForm.elements.timezone.value =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  function subscriptionSchedule() {
-    const daily = subscriptionForm.elements.schedule.value === "daily";
-    $("#subscribe-interval").hidden = daily;
-    $("#subscribe-at").hidden = !daily;
-    $("#subscribe-timezone").hidden = !daily;
-    subscriptionForm.elements.interval.required = !daily;
-    subscriptionForm.elements.at.required = daily;
-    subscriptionForm.elements.timezone.required = daily;
-  }
-  subscriptionForm.elements.schedule.onchange = subscriptionSchedule;
-  subscriptionSchedule();
   $("#source-form").onsubmit = (event) => {
     event.preventDefault();
     ctx.run(async () => {
@@ -320,29 +223,6 @@ export async function settings(ctx) {
       ctx.toast("任务参数已保存。");
     });
   };
-  $("#subscribe-form").onsubmit = (e) => {
-    e.preventDefault();
-    ctx.run(async () => {
-      const values = new FormData(e.target),
-        daily = values.get("schedule") === "daily";
-      const args = {
-        ...ctx.scope(),
-        enabled: true,
-        download: values.get("download") === "on",
-      };
-      if (daily) {
-        args.at = values.get("at");
-        args.timezone = String(values.get("timezone")).trim();
-      } else args.interval = Number(values.get("interval"));
-      await ctx.act("subscribe", args);
-      await subscriptions();
-      ctx.toast(
-        args.download
-          ? "已保存订阅，并允许按计划自动下载。"
-          : "已保存目录订阅，不会自动下载行情。",
-      );
-    });
-  };
   $("#register-form").onsubmit = (e) => {
     e.preventDefault();
     ctx.run(async () => {
@@ -362,7 +242,6 @@ export async function settings(ctx) {
     });
   await selectSettings(ctx.state.settingsTab || "transfer", r);
   ctx.poll = async () => {
-    if (ctx.state.settingsTab === "subscriptions") await subscriptions();
     if (ctx.state.settingsTab === "nodes") await nodes();
   };
 }

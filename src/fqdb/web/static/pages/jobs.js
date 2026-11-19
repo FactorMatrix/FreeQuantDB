@@ -31,6 +31,7 @@ export async function jobs(ctx) {
                   scan: "扫描登记",
                   source_fetch: "上游获取",
                   catalog_refresh: "目录检查",
+                  subscription_check: "订阅检查",
                   transfer_prepare: "准备本地分片",
                   download_validate: "验证下载文件",
                 }[r.kind] || r.kind,
@@ -43,7 +44,7 @@ export async function jobs(ctx) {
               r.status === "complete"
                 ? "完成"
                 : r.status === "paused"
-                  ? "等待手动重新提交"
+                  ? r.kind === "subscription_check" ? "检查已中断" : "等待手动重新提交"
                   : esc(r.detail || "等待执行"),
           },
           { title: "最近更新", render: (r) => shortTime(r.updated_at) },

@@ -20,6 +20,7 @@ def task_row(task):
         "start_date": entry.get("start_date") or entry.get("trading_date"),
         "end_date": entry.get("end_date") or entry.get("trading_date"),
         "kind": task["body"]["kind"],
+        "origin": task["body"].get("origin"),
         "size": entry.get("size") if entry.get("size") is not None else task["metrics"].get("native_size"),
         "version": entry.get("version"),
         "catalog_path": file.removeprefix("data/") + ".json" if file.startswith("data/") else None,

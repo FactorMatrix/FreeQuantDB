@@ -47,6 +47,7 @@ class Store:
                 verified_at TEXT,mtime_ns INTEGER,size INTEGER);
             CREATE TABLE IF NOT EXISTS bt_verified_versions(hash TEXT PRIMARY KEY);
             CREATE TABLE IF NOT EXISTS subscriptions(id TEXT PRIMARY KEY,body TEXT,next_run REAL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS subscription_packages(id TEXT PRIMARY KEY,body TEXT NOT NULL);
             """)
         self._recover_market_switches()
 
@@ -167,21 +168,24 @@ class Store:
         with self.db() as connection:
             return self._resolve_entry(connection, entry)
 
+    def _write_entry(self, connection, entry):
+        entry = self._resolve_entry(connection, entry)
+        # Negative storage revisions reserve slots for catalog magnets.
+        # Versioned local publications keep their original positive slot.
+        version, magnet_ranked = entry.revision_order
+        stored_version = -version if magnet_ranked else version
+        connection.execute(
+            "INSERT INTO entries VALUES(?,?,?,?,?,?) ON CONFLICT(hash) DO UPDATE SET "
+            "version=excluded.version, body=excluded.body",
+            (entry.info_hash, *entry.key, stored_version, json.dumps(entry.to_dict())),
+        )
+        return entry
+
     def add_entry(self, entry):
         entry.validate(self.root)
         with self.db() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            entry = self._resolve_entry(connection, entry)
-            # Negative storage revisions reserve slots for catalog magnets.
-            # Versioned local publications keep their original positive slot.
-            version, magnet_ranked = entry.revision_order
-            stored_version = -version if magnet_ranked else version
-            connection.execute(
-                "INSERT INTO entries VALUES(?,?,?,?,?,?) ON CONFLICT(hash) DO UPDATE SET "
-                "version=excluded.version, body=excluded.body",
-                (entry.info_hash, *entry.key, stored_version, json.dumps(entry.to_dict())),
-            )
-        return entry
+            return self._write_entry(connection, entry)
 
     def add_magnet(self, entry):
         if not entry.sparse:
@@ -486,6 +490,43 @@ class Store:
                 )
         return identity
 
+    def enqueue_subscription(self, entries, subscription_id):
+        """Create only unseen tasks, preserving every existing task decision."""
+        if not entries:
+            return []
+        inserted = []
+        with self.db() as c:
+            c.execute("BEGIN IMMEDIATE")
+            for entry in entries:
+                identity = entry.info_hash
+                if c.execute("SELECT 1 FROM tasks WHERE id=?", (identity,)).fetchone():
+                    continue
+                entry = self._write_entry(c, entry)
+                body = {
+                    "kind": "day",
+                    "entry": entry.to_dict(),
+                    "origin": "subscription",
+                    "subscription_id": subscription_id,
+                }
+                c.execute(
+                    "INSERT INTO tasks(id,body,status,updated_at) VALUES(?,?,'queued',?)",
+                    (identity, json.dumps(body), now()),
+                )
+                inserted.append(identity)
+        return inserted
+
+    def subscription_tasks(self, subscription_id, statuses):
+        placeholders = ",".join("?" for _ in statuses)
+        with self.db() as c:
+            return [
+                self._task_record(row)
+                for row in c.execute(
+                    f"SELECT * FROM tasks WHERE status IN ({placeholders}) "
+                    "AND json_extract(body,'$.subscription_id')=?",
+                    (*statuses, subscription_id),
+                )
+            ]
+
     @staticmethod
     def _task_record(row):
         return dict(row) | {"body": json.loads(row["body"]), "metrics": json.loads(row["metrics"])}
@@ -525,20 +566,47 @@ class Store:
                 for r in c.execute("SELECT * FROM reports ORDER BY id DESC LIMIT 50")
             ]
 
-    def subscribe(self, body):
-        if int(body.get("interval", 3600)) < 10:
-            raise FQDBError("Subscription interval must be >= 10 seconds")
-        identity = f"{body['dataset']}/{body['frequency']}"
-        self.dataset(body["dataset"])
+    def subscribe(self, body, *, next_run=0, reset_selection=False):
+        dataset = body.get("dataset")
+        frequency = body.get("frequency")
+        identity = f"{dataset}/{frequency}" if dataset else "catalog"
+        if dataset and frequency not in self.dataset(dataset).frequencies:
+            raise FQDBError(f"Frequency not declared in dataset: {frequency}")
         with self.db() as c:
             c.execute(
-                "INSERT INTO subscriptions VALUES(?,?,0) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
-                (identity, json.dumps(body)),
+                "INSERT INTO subscriptions VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET "
+                "body=excluded.body,next_run=excluded.next_run",
+                (identity, json.dumps(body), next_run),
             )
+            if reset_selection:
+                c.execute("DELETE FROM subscription_packages WHERE id=?", (identity,))
         return identity
+
+    def unsubscribe(self, identity):
+        with self.db() as c:
+            c.execute("DELETE FROM subscriptions WHERE id=?", (identity,))
+            c.execute("DELETE FROM subscription_packages WHERE id=?", (identity,))
+
+    def subscription(self, identity):
+        with self.db() as c:
+            row = c.execute("SELECT * FROM subscriptions WHERE id=?", (identity,)).fetchone()
+        return dict(row) | {"body": json.loads(row["body"])} if row else None
 
     def subscriptions(self):
         with self.db() as c:
             return [
                 dict(r) | {"body": json.loads(r["body"])} for r in c.execute("SELECT * FROM subscriptions")
             ]
+
+    def subscription_packages(self, identity):
+        with self.db() as c:
+            row = c.execute("SELECT body FROM subscription_packages WHERE id=?", (identity,)).fetchone()
+        return json.loads(row[0]) if row is not None else None
+
+    def save_subscription_packages(self, identity, packages):
+        if packages is not None:
+            with self.db() as c:
+                c.execute(
+                    "INSERT INTO subscription_packages VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body",
+                    (identity, json.dumps(packages, separators=(",", ":"))),
+                )

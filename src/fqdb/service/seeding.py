@@ -14,7 +14,8 @@ from ..publish.paths import resolve_file
 from ..util import FQDBError, safe_path
 from .provision import selected
 
-SEED_REFRESH_SECONDS = 2
+SEED_RECONCILE_SECONDS = 2
+AUTO_SEED_RESCAN_SECONDS = 60
 SEED_RESTORE_BATCH = 8
 
 
@@ -167,11 +168,13 @@ class Seeding:
                 return
             if not self.enabled and not (self.gateway_activated and self.owner.gateway_enabled):
                 return
-            deadline = now + SEED_REFRESH_SECONDS
+            interval = AUTO_SEED_RESCAN_SECONDS if self.automatic else SEED_RECONCILE_SECONDS
+            deadline = now + interval
             self._refresh_after = deadline
             native_issues = self.native_issues.copy()
+            uploading = self.owner._engine.uploads.copy() if self.automatic and self.owner._engine else set()
         try:
-            ready, issues = self._scan_candidates(self.config.read(), native_issues)
+            ready, issues = self._scan_candidates(self.config.read(), native_issues, uploading)
         except Exception:
             with self.lock:
                 if self._refresh_after == deadline:
@@ -182,13 +185,17 @@ class Seeding:
                 return
             self._candidates = ready
             self.issues = issues
-            self._refresh_after = time.monotonic() + SEED_REFRESH_SECONDS
+            self._refresh_after = time.monotonic() + interval
             self._reconcile_after = 0
 
-    def _scan_candidates(self, cfg, native_issues):
+    def _scan_candidates(self, cfg, native_issues, uploading):
         active = {e.info_hash: e for e, _ in self.store.active()}
         cached = self.store.verified_versions()
-        entries = self.store.entries_by_hash(cached) if cfg["seed_old_versions"] else active
+        # Keep in-session uploads on their verified immutable copies after a revision.
+        historical = cached.keys() - active.keys()
+        if not cfg["seed_old_versions"]:
+            historical &= uploading
+        entries = active | self.store.entries_by_hash(historical)
         issues = []
         ready = {}
         for identity, entry in entries.items():
@@ -396,7 +403,7 @@ class Seeding:
         now = time.monotonic()
         if now < self._reconcile_after:
             return
-        self._reconcile_after = now + SEED_REFRESH_SECONDS
+        self._reconcile_after = now + SEED_RECONCILE_SECONDS
         root = self.config.root
         engine = self.owner.engine
         for identity in engine.uploads - self.verifying_seeds:

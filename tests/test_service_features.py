@@ -8,7 +8,6 @@ import threading
 import time
 
 from fastapi.testclient import TestClient
-import pytest
 
 import fqdb
 from fqdb import api
@@ -16,7 +15,7 @@ from fqdb.config import Config
 from fqdb.publish.catalog import export_public_catalog
 from fqdb.service import checks, core
 from fqdb.service.client import Client
-from fqdb.service.subscriptions import next_run
+from fqdb.service.subscriptions import DEFAULT_INTERVAL, next_run
 from fqdb.service.jobs import Jobs
 from fqdb.web.app import create_app
 from magnet_helpers import mirror
@@ -66,7 +65,7 @@ def test_sdk_subscriptions_refresh_catalog_without_implicit_download(data_root):
                 break
             time.sleep(0.2)
         body = subscription["body"]
-        assert body["download"] is False and len(body["last_result"]["packages"]) == 2
+        assert body["download"] is False and body["last_result"]["package_count"] == 2
         assert body["last_result"]["source"] and body["last_error"] is None
         assert not state["published"] and state["tasks"] == [] and state["transfers"] == []
         assert list((subscriber / "data").rglob("*.parquet")) == []
@@ -74,14 +73,15 @@ def test_sdk_subscriptions_refresh_catalog_without_implicit_download(data_root):
         assert Config(subscriber).read()["source_checks"][str(exported)]["status"] == "catalog_available"
         direct = api.subscribe(schema.id, "1d", interval=10, enabled=False)
         assert direct["download"] is False
-        with pytest.raises(ValueError, match="choose packages explicitly"):
-            fqdb.subscribe(schema.id, "1d", interval=10, download=True, enabled=False)
-        scheduled = fqdb.subscribe(schema.id, "1d", at="15:30", timezone="Asia/Shanghai")
+        automatic = fqdb.subscribe(schema.id, "1d", interval=10, download=True, enabled=False)
+        assert automatic["download"] is True
+        scheduled = fqdb.subscribe(schema.id, "1d", at="15:30", timezone="Asia/Shanghai", enabled=False)
         assert scheduled["next_run"] > time.time() and scheduled["download"] is False
         session.close()
         shutdown(client)
         restored = client.get("/api/status")["subscriptions"][0]
         assert restored["body"]["timezone"] == "Asia/Shanghai"
+        assert restored["body"]["interval"] == DEFAULT_INTERVAL == 3 * 3600
         assert restored["body"]["download"] is False and restored["next_run"] > time.time()
         assert client.endpoint() is None
         assert Config().root == subscriber
@@ -207,7 +207,7 @@ def test_persisted_interrupted_job_requires_new_explicit_request(data_root):
         owner.close()
 
 
-def test_interrupted_subscription_waits_for_manual_enable_without_duplicate_job(data_root):
+def test_interrupted_check_resumes_subscription_only_after_gateway_activation(data_root, monkeypatch):
     store, schema, _ = setup_store(data_root)
     Jobs(store, lambda *_: {}).close()
     identity = "SYNTHETIC-interrupted-subscription"
@@ -219,29 +219,93 @@ def test_interrupted_subscription_waits_for_manual_enable_without_duplicate_job(
             "INSERT INTO service_jobs VALUES(?,?,?,'running',0,NULL,NULL,NULL,?,?)",
             (identity, "catalog_refresh", json.dumps(body), stamp, stamp),
         )
-    owner = core.Owner(Config(data_root))
+    owner = core.Owner(Config(data_root).ensure())
+    owner.config.update(auto_seed=False)
+    monkeypatch.setattr(owner.catalogs, "refresh", lambda args: {"packages": [], "source": args["source"]})
     try:
-        owner.subscriptions.schedule(subscriptions=True)
-        paused = owner.store.subscriptions()[0]["body"]
-        assert paused["enabled"] is False and paused["running_job"] is None
-        assert paused["last_error"]
-        owner.subscriptions.last_schedule = 0
-        owner.subscriptions.schedule(subscriptions=True)
+        owner.subscriptions.schedule()
         assert len(owner.jobs.list()) == 1
+        assert owner.jobs.get(identity)["status"] == "paused"
         assert owner._engine is None
-        with store.db() as db:
-            assert (
-                db.execute("SELECT status FROM service_jobs WHERE id=?", (identity,)).fetchone()[0]
-                == "running"
-            )
-        owner.subscriptions.subscribe(paused | {"enabled": True})
-        owner.subscriptions.last_schedule = 0
-        owner.subscriptions.schedule(subscriptions=True)
-        resumed = next(row for row in owner.store.subscriptions() if row["id"] == subscription)
+        owner.activate_gateway()
+        with owner.lock:
+            owner.subscriptions.schedule()
+        resumed = owner.store.subscription(subscription)
+        assert resumed["body"].get("enabled", True)
         assert resumed["body"]["running_job"] != identity
         assert len(owner.jobs.list()) == 2
+        assert owner.jobs.get(identity)["status"] == "paused"
+        assert owner.has_work()
     finally:
         owner.close()
+
+
+def test_gateway_batches_due_catalog_checks_and_keeps_idle_schedule(data_root, monkeypatch):
+    store, schema, _ = setup_store(data_root)
+    owner = core.Owner(Config(data_root).ensure())
+    owner.config.update(auto_seed=False)
+    refreshed, calls = threading.Event(), []
+
+    def refresh(args):
+        calls.append(args["source"])
+        refreshed.set()
+        return {"packages": [], "source": args["source"]}
+
+    monkeypatch.setattr(owner.catalogs, "refresh", refresh)
+    try:
+        local_catalog = str(data_root / "SYNTHETIC-catalog")
+        missing_scope = owner.subscriptions.subscribe({"source": local_catalog, "download": True})
+        assert missing_scope["id"] == "catalog" and not missing_scope["download"]
+        owner.subscriptions.subscribe({"source": local_catalog, "dataset": schema.id})
+        owner.activate_gateway()
+        owner.start()
+        assert refreshed.wait(5)
+        end = time.monotonic() + 5
+        while time.monotonic() < end:
+            rows = store.subscriptions()
+            if all(row["body"].get("last_check") for row in rows):
+                break
+            time.sleep(0.1)
+        assert len(rows) == 2 and all(row["body"].get("last_check") for row in rows)
+        assert all(row["body"]["last_result"]["task_ids"] == [] for row in rows)
+        assert all(row["next_run"] > time.time() + DEFAULT_INTERVAL - 10 for row in rows)
+        assert calls == [local_catalog]
+        assert owner._engine is None and not owner.gateway_enabled and owner.has_work()
+    finally:
+        owner.close()
+
+
+def test_disabling_subscription_during_selection_prevents_stale_enrollment(data_root, monkeypatch):
+    store, schema, _ = setup_store(data_root)
+    owner = core.Owner(Config(data_root).ensure())
+    owner.config.update(auto_seed=False)
+    entered, release = threading.Event(), threading.Event()
+    enqueued = []
+
+    def candidates(body, result):
+        entered.set()
+        assert release.wait(5)
+        return [], {"SYNTHETIC-package.json": "SYNTHETIC-identity"}
+
+    monkeypatch.setattr(owner.catalogs, "refresh", lambda args: {"source": args["source"]})
+    monkeypatch.setattr(owner.catalogs, "subscription_candidates", candidates)
+    monkeypatch.setattr(owner.catalogs, "enqueue_subscription", lambda *_: enqueued.append(True))
+    options = {"dataset": schema.id, "download": True}
+    identity = owner.dispatch("subscribe", options)["id"]
+    owner.activate_gateway()
+    owner.start()
+    try:
+        assert entered.wait(5)
+        job = store.subscription(identity)["body"]["running_job"]
+        owner.dispatch("subscribe", options | {"enabled": False})
+        assert owner.jobs.get(job)["status"] == "cancelled"
+        release.set()
+    finally:
+        release.set()
+        owner.close()
+    assert not enqueued
+    assert store.subscription_packages(identity) is None
+    assert store.subscription(identity)["body"]["enabled"] is False
 
 
 def test_public_management_facades_and_cli_use_one_owner(data_root):
