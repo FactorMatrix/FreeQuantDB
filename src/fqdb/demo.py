@@ -12,6 +12,7 @@ from .schema.registry import base_dataset
 MARKET_SYMBOLS = {
     "stock": ("000100.SZ", "600000.SH", "430047.BJ"),
     "etf": ("510300.SH", "159915.SZ"),
+    "lof": ("160999.SZ", "501999.SH"),
     "future": ("RB2701.SHFE", "I2701.DCE", "TA2701.CZCE", "IF2701.CFFEX"),
 }
 

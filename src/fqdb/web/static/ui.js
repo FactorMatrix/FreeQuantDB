@@ -31,6 +31,7 @@ export const names = {
   hk: "中国香港",
   stock: "股票",
   etf: "ETF",
+  lof: "LOF",
   future: "期货",
   option: "期权",
   fund: "基金",

@@ -26,7 +26,7 @@ from fqdb.validation.quality import validate
 FUTURES_EXTRA_COLUMNS = ("settlement", "prev_settlement", "open_interest", "limit_up", "limit_down")
 
 
-@pytest.mark.parametrize("asset", ["stock", "etf", "future"])
+@pytest.mark.parametrize("asset", ["stock", "etf", "lof", "future"])
 @pytest.mark.parametrize("frequency", ["1d", "1m"])
 def test_exact_market_columns_physical_types_and_compression(data_root, asset, frequency):
     schema = market_schema(asset).for_frequency(frequency)
@@ -58,7 +58,7 @@ def test_exact_market_columns_physical_types_and_compression(data_root, asset, f
     assert not any(name.startswith("__index") for name in physical.names)
 
 
-@pytest.mark.parametrize("asset", ["stock", "etf", "future"])
+@pytest.mark.parametrize("asset", ["stock", "etf", "lof", "future"])
 def test_current_contract_roundtrip_frequency_selection(asset):
     schema = base_dataset(asset)
     # JSON maps may be serialized in canonical key order; physical order remains contractual.
@@ -142,6 +142,8 @@ def test_market_registry_isolates_paths_catalog_and_queries(data_root, monkeypat
         ("430047.BJ", "stock"),
         ("159915.SZ", "etf"),
         ("510300.SH", "etf"),
+        ("160999.SZ", "lof"),
+        ("501999.SH", "lof"),
         ("RB2701.SHFE", "future"),
         ("I2701.DCE", "future"),
         ("L2701F.DCE", "future"),
@@ -172,6 +174,8 @@ def test_explicit_instrument_suffixes(value, asset):
         ("L2701F.SHFE", "future"),
         ("I2701F.DCE", "future"),
         ("L2713F.DCE", "future"),
+        ("160999.BJ", "lof"),
+        ("16099.SZ", "lof"),
     ],
 )
 def test_unknown_or_ambiguous_instruments_are_not_guessed(value, asset):

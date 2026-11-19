@@ -18,7 +18,7 @@ from fqdb.storage.metadata import Store
 from fqdb.planning.planner import plan
 
 
-@pytest.mark.parametrize("asset,daily_columns", [("stock", 9), ("etf", 9), ("future", 14)])
+@pytest.mark.parametrize("asset,daily_columns", [("stock", 9), ("etf", 9), ("lof", 9), ("future", 14)])
 @pytest.mark.parametrize("frequency", ["1d", "1m"])
 def test_all_market_assets_exact_types_and_day_month_year(data_root, asset, daily_columns, frequency):
     Config(data_root).ensure()

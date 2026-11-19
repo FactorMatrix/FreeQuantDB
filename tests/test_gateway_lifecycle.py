@@ -61,7 +61,12 @@ def test_passive_sdk_and_finite_configuration_do_not_start_native_or_service(dat
     monkeypatch.setattr(core, "Engine", forbidden)
     monkeypatch.setattr(subprocess, "Popen", forbidden)
     client = Client(data_root)
-    assert len(fqdb.datasets()) == 3
+    assert {dataset["id"] for dataset in fqdb.datasets()} == {
+        "cn/stock/base",
+        "cn/etf/base",
+        "cn/lof/base",
+        "cn/future/base",
+    }
     assert fqdb.tasks() == []
     assert fqdb.peers.list()["nodes"] == []
     assert fqdb.sources.list()["sources"] == []

@@ -50,6 +50,7 @@ MARKET_CONTRACTS = {
         {
             "stock": AssetContract(("SZ", "SH", "BJ"), _SECURITY_CODE, _SHARE_UNITS, _CNY),
             "etf": AssetContract(("SZ", "SH"), _SECURITY_CODE, _SHARE_UNITS, _CNY),
+            "lof": AssetContract(("SZ", "SH"), _SECURITY_CODE, _SHARE_UNITS, _CNY),
             "future": AssetContract(
                 ("SHFE", "DCE", "CZCE", "CFFEX", "INE", "GFEX"),
                 _FUTURE_CODE,
