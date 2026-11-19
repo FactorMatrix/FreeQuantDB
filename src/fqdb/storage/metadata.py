@@ -437,6 +437,20 @@ class Store:
                 result.append((e, dict(r)))
         return result
 
+    def active_file_evidence(self, scope=None):
+        """Read current file identities and stat evidence without expanding entries."""
+        sql = (
+            "SELECT json_extract(e.body, '$.file') AS file,a.hash,a.size,a.mtime_ns "
+            "FROM active a JOIN entries e ON e.hash=a.hash"
+        )
+        if scope is not None:
+            sql += " WHERE a.dataset=? AND a.frequency=?"
+        with self.db() as c:
+            return {
+                row["file"]: (row["hash"], row["size"], row["mtime_ns"])
+                for row in c.execute(sql, scope or ())
+            }
+
     def revisions(self, key):
         with self.db() as c:
             rows = c.execute(

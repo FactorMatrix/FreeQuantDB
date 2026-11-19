@@ -52,19 +52,23 @@ def build(client, *, missing_file=False):
     return entry
 
 
-def configure_upload(page, client):
+def configure_limits(page, client):
     form = page.locator("#provider-limit")
     limit = form.get_by_label("总上传上限（MB/s）")
+    download = form.get_by_label("总下载上限（MB/s）")
     expect(limit).to_have_value("2.5")
+    expect(download).to_have_value("0")
     limit.fill("0")
     form.get_by_role("button", name="保存限速").click()
     expect(page.locator("#priority-note")).to_contain_text("设置上传总限速后")
     assert client.call("priority_list")["global_upload_limit"] == 0
 
     limit.fill("1.234567")
+    download.fill("3.5")
     form.get_by_role("button", name="保存限速").click()
     expect(page.locator("#priority-note")).not_to_contain_text("设置上传总限速后")
     assert client.config.read()["upload_limit"] == 1_234_567
+    assert client.config.read()["download_limit"] == 3_500_000
     assert client.call("priority_list")["global_upload_limit"] == 1_234_567
 
     priority = page.locator("#provider-priority")
@@ -101,6 +105,13 @@ def main():
             browser = playwright.chromium.launch()
             for name, client in clients.items():
                 page = browser.new_page(viewport={"width": 1440, "height": 1000})
+                runtime_reads = []
+                page.on(
+                    "request",
+                    lambda request: runtime_reads.append(request.url)
+                    if request.url.endswith("/api/console/runtime")
+                    else None,
+                )
                 page.on("pageerror", lambda error: errors.append(str(error)))
                 page.on(
                     "response",
@@ -111,46 +122,52 @@ def main():
                     ),
                 )
                 endpoint, session = client.open_gateway()
-                page.goto(endpoint["url"] + "/?session=" + session["session_id"] + "#/provider")
-                expect(page.locator("#provider-state")).to_have_text("做种已开启")
+                page.goto(endpoint["url"] + "/?session=" + session["session_id"] + "#/downloads")
+                expect(page.locator("#task-queue-title")).to_be_visible()
+                expect(page.locator("#provider-state")).to_have_count(0)
+                assert runtime_reads == []
+                if name == "ready":
+                    page.screenshot(path=str(evidence / "transfer.png"), full_page=True)
+                page.locator("#transfer-settings > summary").click()
+                expect(page.locator("#provider-state")).to_have_text("后台共享已开启")
                 toggle = page.locator("#provider-toggle")
-                expect(toggle).to_have_text("暂停做种")
+                expect(toggle).to_have_text("暂停共享")
                 expect(page.locator("#provider-metrics")).to_contain_text("0 MB/s")
                 if name == "ready":
                     import libtorrent as lt
 
                     expect(page.locator("#provider-message")).to_have_text("等待节点")
                     metrics = page.locator("#provider-metrics .metric-card")
-                    expect(metrics.filter(has_text="可做种数据包")).to_contain_text("1")
+                    expect(metrics.filter(has_text="可共享数据包")).to_contain_text("1")
                     until(lambda: any(
                         row["id"] == expected_entry.info_hash and row["seeding"]
                         for row in client.get("/api/status")["transfers"]
                     ))
                     cached = torrent_cache_path(client.config.root, expected_entry)
                     assert info_hash(lt.torrent_info(str(cached))) == expected_entry.info_hash
-                    rules = configure_upload(page, client)
+                    rules = configure_limits(page, client)
                     page.screenshot(path=str(evidence / "seeding-waiting.png"), full_page=True)
                     rules.get_by_role("button", name="删除 127.0.0.2").click()
                     expect(rules.get_by_text("127.0.0.2", exact=True)).not_to_be_visible()
                     assert [rule["ip"] for rule in client.call("priority_list")["rules"]] == ["::1"]
                     toggle.click()
-                    expect(page.locator("#provider-state")).to_have_text("做种已暂停")
-                    expect(metrics.filter(has_text="可做种数据包")).to_contain_text("1")
+                    expect(page.locator("#provider-state")).to_have_text("后台共享已暂停")
+                    expect(metrics.filter(has_text="可共享数据包")).to_contain_text("1")
                     assert client.get("/api/status")["transfers"] == []
                     assert client.config.read()["auto_seed"] is False
                     page.screenshot(path=str(evidence / "seeding-paused.png"), full_page=True)
                     toggle.click()
-                    expect(page.locator("#provider-state")).to_have_text("做种已开启")
+                    expect(page.locator("#provider-state")).to_have_text("后台共享已开启")
                     expect(page.locator("#provider-message")).to_have_text("等待节点")
                     checks.extend([
                         "Gateway restores the original synthetic torrent without waiting for a user click.",
-                        "Upload limit saves in bytes per second and applies to libtorrent, including unlimited.",
+                        "Both transfer limits save in bytes per second, including unlimited.",
                         "IPv4 and IPv6 rules share a high-priority native class and can be deleted.",
                         "Page pauses and resumes seeding and persists the pause preference.",
                     ])
                 else:
                     expect(page.locator("#provider-message")).to_have_text(
-                        "暂无可做种数据" if name == "empty" else "本地文件缺失"
+                        "暂无可共享数据" if name == "empty" else "本地文件缺失"
                     )
                     assert client.get("/api/status")["transfers"] == []
                     if name == "missing":

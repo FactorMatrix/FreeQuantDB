@@ -2,7 +2,7 @@ import { $, esc, metric, num, reasonText, table } from "../ui.js";
 
 const BYTES_PER_MB = 1_000_000;
 const provisionStates = {
-  no_data: "暂无可做种数据",
+  no_data: "暂无可共享数据",
   waiting_peers: "等待节点",
   ready: "节点已连接，等待请求",
   sharing: "正在上传",
@@ -24,13 +24,12 @@ const issueLabels = {
 
 const mb = (bytes) => bytes / BYTES_PER_MB;
 
-export async function provider(ctx) {
+export async function mountTransferSettings(ctx, view) {
   const initial = await ctx.api("runtime");
   if (!ctx.live()) return;
-  const view = $("#view");
   view.innerHTML = `
     <div class="ops-workspace ops-provision">
-      <section class="panel" id="provider-status" aria-label="做种状态">
+      <section class="panel" id="provider-status" aria-label="共享设置">
         <div class="panel-header">
           <div class="ops-provider-state"><h2><i class="dot" aria-hidden="true"></i><span id="provider-state"></span></h2><p id="provider-message" class="muted"></p></div>
           <button class="button" type="button" id="provider-toggle"></button>
@@ -38,6 +37,7 @@ export async function provider(ctx) {
         <div class="metric-grid" id="provider-metrics"></div>
         <div class="panel-body ops-provider-limit">
           <form id="provider-limit" class="form-row">
+            <label>总下载上限（MB/s）<input name="download_limit" type="number" min="0" max="2147.483647" step="0.000001" required aria-describedby="provider-limit-note"></label>
             <label>总上传上限（MB/s）<input name="limit" type="number" min="0" max="2147.483647" step="0.000001" required aria-describedby="provider-limit-note"></label>
             <button class="button button-primary">保存限速</button>
           </form>
@@ -64,6 +64,7 @@ export async function provider(ctx) {
   const toggle = $("#provider-toggle", view);
   const limitForm = $("#provider-limit", view);
   const limitInput = limitForm.elements.limit;
+  const downloadInput = limitForm.elements.download_limit;
   const priorityForm = $("#provider-priority", view);
   const rules = $("#provider-rules", view);
   const issuePanel = $("#provider-issues", view);
@@ -78,10 +79,10 @@ export async function provider(ctx) {
     enabled = current.provider;
     const paused = !enabled && settings.auto_seed === false;
     $("#provider-state", view).textContent = enabled
-      ? "做种已开启"
+      ? "后台共享已开启"
       : paused
-        ? "做种已暂停"
-        : "做种未开启";
+        ? "后台共享已暂停"
+        : "后台共享未开启";
     const message = $("#provider-message", view);
     message.textContent = paused
       ? current.upload_rate > 0 ? "下载任务仍可分享已下载的分片。" : ""
@@ -90,12 +91,16 @@ export async function provider(ctx) {
     const indicator = $("#provider-status .dot", view);
     indicator.className = `dot ${enabled ? "good" : "neutral"}`;
     $("#provider-metrics", view).innerHTML =
-      metric(`${mb(current.upload_rate)} MB/s`, "当前总上传速度") +
-      metric(num(provision.eligible), "可做种数据包");
-    toggle.textContent = enabled ? "暂停做种" : "开启做种";
+      metric(`${mb(current.download_rate)} MB/s`, "下载速度") +
+      metric(`${mb(current.upload_rate)} MB/s`, "上传速度") +
+      metric(num(provision.eligible), "可共享数据包");
+    toggle.textContent = enabled ? "暂停共享" : "开启共享";
     toggle.classList.toggle("button-primary", !enabled);
     toggle.disabled = toggling;
-    if (!editingLimit) limitInput.value = mb(settings.upload_limit);
+    if (!editingLimit) {
+      limitInput.value = mb(settings.upload_limit);
+      downloadInput.value = mb(settings.download_limit);
+    }
 
     const rulesContent = table(
       [
@@ -141,7 +146,6 @@ export async function provider(ctx) {
   async function refresh() {
     const current = await ctx.api("runtime");
     if (!ctx.live()) return;
-    ctx.paintRuntime(current);
     paint(current);
   }
 
@@ -155,14 +159,17 @@ export async function provider(ctx) {
     }
     await refresh();
   });
-  limitInput.oninput = () => { editingLimit = true; };
+  limitForm.oninput = () => { editingLimit = true; };
   limitForm.onsubmit = (event) => {
     event.preventDefault();
     ctx.run(async () => {
-      await ctx.act("settings", { upload_limit: Math.round(limitInput.valueAsNumber * BYTES_PER_MB) });
+      await ctx.act("settings", {
+        upload_limit: Math.round(limitInput.valueAsNumber * BYTES_PER_MB),
+        download_limit: Math.round(downloadInput.valueAsNumber * BYTES_PER_MB),
+      });
       editingLimit = false;
       await refresh();
-      ctx.toast("上传限速已保存。");
+      ctx.toast("传输限速已保存。");
     });
   };
   priorityForm.onsubmit = (event) => {
@@ -183,5 +190,5 @@ export async function provider(ctx) {
   };
 
   paint(initial);
-  ctx.poll = paint;
+  return refresh;
 }

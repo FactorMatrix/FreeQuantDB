@@ -14,12 +14,12 @@ import {
 } from "../ui.js";
 
 export async function settings(ctx) {
-  const r = await ctx.api("runtime");
+  const r = await ctx.api("settings");
   if (!ctx.live()) return;
   const cfg = r.settings;
   $("#view").innerHTML = `
     <nav class="detail-tabs tabs" id="settings-tabs" aria-label="设置分类">${[
-      ["transfer", "传输"],
+      ["transfer", "任务"],
       ["nodes", "节点"],
       ["subscriptions", "订阅"],
       ["sources", "目录源"],
@@ -31,10 +31,9 @@ export async function settings(ctx) {
           `<button type="button" data-settings-tab="${k}" class="tab">${t}</button>`,
       )
       .join("")}</nav>
-    <section class="panel" data-settings-section="transfer"><div class="panel-header"><h2>传输设置</h2></div><div class="panel-body"><form id="settings-form" class="form-grid">${[
+    <section class="panel" data-settings-section="transfer"><div class="panel-header"><h2>任务参数</h2></div><div class="panel-body"><form id="settings-form" class="form-grid">${[
       ["max_active", "并发下载数", 1],
       ["connections_limit", "连接上限", 1],
-      ["download_limit", "下载上限（B/s，0 不限）", 0],
       ["peer_timeout", "停滞超时（秒）", 1],
       ["max_retries", "失败重试次数", 0],
     ]
@@ -72,7 +71,7 @@ export async function settings(ctx) {
     <section class="panel" data-settings-section="storage"><div class="panel-header"><h2>数据位置</h2></div><div class="panel-body"><dl class="facts"><div class="fact"><dt>数据根目录</dt><dd><code>${esc(r.data_dir)}</code></dd></div></dl><p class="panel-note">更换目录：停止服务后运行 <code>fqdb init --data-dir</code>。</p><button type="button" class="button" id="layout-preview">刷新目录信息</button><div id="layout-result"></div></div></section>
     <section class="panel" data-settings-section="advanced"><div class="panel-header"><h2>扩展与日志</h2><button id="logs" class="button">读取日志</button></div><div class="panel-body"><details class="advanced"><summary>注册数据集</summary><form id="register-form"><label>数据描述 JSON<textarea name="descriptor" rows="6" required placeholder="字段、主键、时区、来源、授权和规则"></textarea></label><div class="action-row"><button class="button">校验并注册</button></div></form></details><pre id="log-output" hidden></pre>${jsonDetails(cfg, "服务配置详情")}</div></section>`;
   bindScope(ctx, "subscription", true);
-  function selectSettings(tab) {
+  async function selectSettings(tab, snapshot) {
     ctx.state.settingsTab = tab;
     $$("[data-settings-tab]").forEach((b) => {
       b.classList.toggle("active", b.dataset.settingsTab === tab);
@@ -81,11 +80,13 @@ export async function settings(ctx) {
     $$("[data-settings-section]").forEach((panel) => {
       panel.hidden = panel.dataset.settingsSection !== tab;
     });
+    if (tab === "storage") await layoutInfo();
+    if (tab === "subscriptions") await subscriptions(snapshot);
+    if (tab === "nodes") await nodes(snapshot?.settings.peer_nodes);
   }
   $$("[data-settings-tab]").forEach((b) => {
-    b.onclick = () => selectSettings(b.dataset.settingsTab);
+    b.onclick = () => ctx.run(() => selectSettings(b.dataset.settingsTab));
   });
-  selectSettings(ctx.state.settingsTab || "transfer");
   async function layoutInfo() {
     const info = await ctx.api("layout");
     if (!ctx.live()) return;
@@ -107,9 +108,8 @@ export async function settings(ctx) {
     );
   }
   $("#layout-preview").onclick = () => ctx.run(layoutInfo);
-  await layoutInfo();
-  async function subscriptions() {
-    const data = await ctx.api("runtime");
+  async function subscriptions(snapshot) {
+    const data = snapshot ?? await ctx.api("settings");
     if (!ctx.live()) return;
     $("#subscriptions").innerHTML = table(
       [
@@ -197,10 +197,10 @@ export async function settings(ctx) {
     $("#peer-node-save").textContent = "添加节点";
     $("#peer-node-reset").hidden = true;
   }
-  async function nodes() {
-    const data = await ctx.act("peers_list");
+  async function nodes(initial) {
+    const rows = initial ?? (await ctx.act("peers_list")).nodes;
     if (!ctx.live()) return;
-    nodeRows = data.nodes;
+    nodeRows = rows;
     $("#peer-nodes").innerHTML = table(
       [
         {
@@ -317,7 +317,7 @@ export async function settings(ctx) {
           [...new FormData(e.target)].map(([k, v]) => [k, Number(v)]),
         ),
       );
-      ctx.toast("传输设置已保存。");
+      ctx.toast("任务参数已保存。");
     });
   };
   $("#subscribe-form").onsubmit = (e) => {
@@ -360,10 +360,9 @@ export async function settings(ctx) {
       $("#log-output").hidden = false;
       $("#log-output").textContent = data.text;
     });
-  await subscriptions();
-  await nodes();
+  await selectSettings(ctx.state.settingsTab || "transfer", r);
   ctx.poll = async () => {
-    await subscriptions();
-    await nodes();
+    if (ctx.state.settingsTab === "subscriptions") await subscriptions();
+    if (ctx.state.settingsTab === "nodes") await nodes();
   };
 }

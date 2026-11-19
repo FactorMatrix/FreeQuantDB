@@ -82,8 +82,6 @@ class Owner:
         with self.lock:
             if self.closing:
                 raise FQDBError("The data worker has stopped")
-            # Start the native listener even when there are no local packages.
-            self.engine
             self.seeding.start_auto()
 
     def has_work(self):
@@ -110,6 +108,7 @@ class Owner:
     def run(self):
         while self.running:
             try:
+                self.seeding.refresh_candidates()
                 with self.lock:
                     self.tick()
             except Exception as exc:
@@ -125,7 +124,9 @@ class Owner:
         self.subscriptions.schedule(
             subscriptions=self.gateway_enabled or (self.seeding.enabled and not self.seeding.automatic)
         )
-        if self._engine is None and not (self.seeding.has_work() or self.transfers.has_work()):
+        if self._engine is None and not (
+            self.gateway_enabled or self.seeding.has_work() or self.transfers.has_work()
+        ):
             return
         self.transfers.tick(self.config.read())
         self.seeding.reconcile()

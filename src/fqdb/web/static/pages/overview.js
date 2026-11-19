@@ -25,7 +25,7 @@ function coverageGroups(datasets) {
 }
 
 export async function overview(ctx) {
-  const { datasets, issue_count, issues, latest_task, runtime, task_counts, totals } = ctx.summary;
+  const { datasets, issue_count, issues, latest_task, task_counts, totals } = ctx.summary;
   const active = Object.entries(task_counts)
     .filter(([status]) => !idleTaskStates.has(status))
     .reduce((sum, [, count]) => sum + count, 0);
@@ -67,14 +67,12 @@ export async function overview(ctx) {
           <div class="overview-legend"><i aria-hidden="true"></i>本地就绪 <span> / </span> 目录收录</div>
         ` : '<p class="overview-empty">暂无数据包，更新磁力链接后可查看覆盖。</p>'}
       </section>
-      <section class="panel overview-transfers" aria-labelledby="overview-transfers-heading">
+      <section class="panel" aria-labelledby="overview-downloads-heading">
         <div class="panel-header">
-          <h2 id="overview-transfers-heading">传输</h2>
-          <button class="text-link" data-go="downloads" type="button">下载任务 →</button>
+          <h2 id="overview-downloads-heading">最近下载</h2>
+          <button class="text-link" data-go="downloads" type="button">查看任务 →</button>
         </div>
-        <div id="overview-runtime"></div>
         <div class="overview-latest-task">
-          <span class="panel-meta">最近下载</span>
           ${latest_task ? `
             <div>${pill(latest_task.status)} <strong>${esc(packagePeriod(latest_task) || "数据包")}</strong></div>
             ${latest_task.updated_at ? `<time datetime="${esc(latest_task.updated_at)}">${esc(shortTime(latest_task.updated_at))}</time>` : ""}
@@ -135,5 +133,4 @@ export async function overview(ctx) {
   clearGroup.onclick = () => showDatasets();
   $$("[data-go]", view).forEach((button) => (button.onclick = () => ctx.navigate(button.dataset.go)));
   showDatasets();
-  ctx.paintRuntime(runtime);
 }

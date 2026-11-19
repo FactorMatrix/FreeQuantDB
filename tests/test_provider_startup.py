@@ -333,6 +333,7 @@ def test_provider_status_excludes_uploads_from_unrelated_download_handles(data_r
     )
     owner.seeding.enabled = True
     try:
+        owner.seeding.refresh_candidates()
         result = owner.seeding.status()
         assert result["eligible"] == 2 and result["status"] == "waiting_peers"
     finally:

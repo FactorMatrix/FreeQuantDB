@@ -17,7 +17,7 @@ def run(*, data_dir=None, open_browser=True, port=0):
     session_id = session["session_id"]
     url = endpoint["url"] + "/?session=" + session_id
     headers = {"Authorization": "Bearer " + endpoint["token"]}
-    print(f"FQDB gateway: {url}\nCtrl+C 退出管理界面，后台继续处理下载和做种。", flush=True)
+    print(f"FQDB gateway: {url}\nCtrl+C 退出管理界面，后台任务继续运行。", flush=True)
     try:
         if open_browser:
             webbrowser.open(url)

@@ -68,7 +68,7 @@ def test_gateway_download_seeds_original_magnet_after_exit_and_restart(data_root
         b.call("peers_add", {"ip": "127.0.0.1", "port": origin["listen_port"]})
         with gateway_session(b):
             running = b.endpoint()
-            assert b.get("/api/status")["provision"]["status"] == "no_data"
+            wait_for(lambda: b.get("/api/status")["provision"]["status"] == "no_data")
             result = b.wait(
                 b.call(
                     "sync",
@@ -139,8 +139,10 @@ def test_gateway_seeds_verified_files_without_resuming_an_interrupted_task(data_
     identity = store.enqueue(entry)
     store.set_task(identity, status="checking")
     owner = Owner(loopback_config(data_root))
+    owner.start()
     try:
         owner.activate_gateway()
+        wait_for(lambda: identity in {row["id"] for row in owner.transfer_status()})
         runtime = owner.status()
         assert identity in {row["id"] for row in runtime["transfers"]}
         assert runtime["tasks"][0]["status"] == "paused"
@@ -176,14 +178,17 @@ def test_gateway_reports_unusable_seed_and_never_overwrites_local_data(data_root
         expected = "data_invalid"
     original = visible.read_bytes() if visible.exists() else None
     owner = Owner(config)
+    owner.start()
     try:
         owner.activate_gateway()
+        wait_for(
+            lambda: any(
+                issue["entry"]["info_hash"] == entry.info_hash and issue["reason"] == expected
+                for issue in owner.status()["provision"]["issues"]
+            )
+        )
         status = owner.status()
         assert all(row["id"] != entry.info_hash for row in status["transfers"])
-        assert any(
-            i["entry"]["info_hash"] == entry.info_hash and i["reason"] == expected
-            for i in status["provision"]["issues"]
-        )
         assert (visible.read_bytes() if visible.exists() else None) == original
     finally:
         owner.close()

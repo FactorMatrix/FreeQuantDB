@@ -22,6 +22,7 @@ class Dashboard:
             "package": self.datasets.package,
             "audit": self.datasets.audit,
             "runtime": self.operations.runtime,
+            "settings": self.operations.settings,
             "tasks": self.operations.tasks,
             "features": self.operations.features,
             "layout": self.operations.layout,

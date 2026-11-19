@@ -1348,14 +1348,6 @@ pre {
   z-index: 100;
   max-width: 90vw;
 }
-footer {
-  margin-top: 20px;
-  color: var(--muted);
-  font-size: 11px;
-}
-footer:has(#activity:empty) {
-  display: none;
-}
 [hidden] {
   display: none !important;
 }
@@ -1713,9 +1705,6 @@ footer:has(#activity:empty) {
   .plan-footer {
     align-items: start;
     flex-direction: column;
-  }
-  footer {
-    font-size: 9px;
   }
   .notice-line {
     align-items: start;

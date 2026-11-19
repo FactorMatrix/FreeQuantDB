@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import sys
+from threading import Event
 import time
 from types import SimpleNamespace
 
@@ -109,6 +110,8 @@ def test_browser_lease_expires_without_the_terminal_extending_it(data_root, monk
         lifetime = Lifetime(owner)
         session_id = lifetime.open()["session_id"]
         assert owner.gateway_enabled
+        owner.seeding.refresh_candidates()
+        owner.tick()
         assert lifetime.heartbeat(session_id, browser=True)["browser_seen"]
         clock[0] += lifetime.ttl - 1
         assert lifetime.heartbeat(session_id, browser=False)["active"]
@@ -117,6 +120,40 @@ def test_browser_lease_expires_without_the_terminal_extending_it(data_root, monk
         assert not owner.gateway_enabled
         assert not owner.has_work()
     finally:
+        owner.close()
+
+
+def test_gateway_lease_and_pause_remain_responsive_during_seed_discovery(data_root, monkeypatch):
+    setup_store(data_root)
+    owner = core.Owner(Config(data_root))
+    lifetime = Lifetime(owner)
+    entered, release = Event(), Event()
+    scan = owner.seeding._scan_candidates
+
+    def delayed_scan(*args):
+        entered.set()
+        assert release.wait(5), "Gateway controls waited for the seed scan"
+        return scan(*args)
+
+    monkeypatch.setattr(owner.seeding, "_scan_candidates", delayed_scan)
+    owner.start()
+    try:
+        session = lifetime.open()
+        assert entered.wait(5)
+        assert lifetime.heartbeat(session["session_id"], browser=True)["active"]
+        provision = owner.status()["provision"]
+        assert provision["status"] == "checking" and provision["eligible"] is None
+        lifetime.close(session["session_id"])
+        assert owner.has_work(), "Closing Gateway before restoration must keep the worker alive"
+        paused = owner.dispatch("provider_stop", {})
+        assert not paused["provider"] and not paused["transfers"]
+        assert not owner.has_work()
+        release.set()
+        with owner.lock:
+            assert not owner.seeding.enabled
+            assert owner.config.read()["auto_seed"] is False
+    finally:
+        release.set()
         owner.close()
 
 
@@ -361,7 +398,11 @@ def test_empty_gateway_is_enabled_without_upload_and_can_idle(data_root):
     client = Client(data_root)
     try:
         with gateway_session(client):
-            state = client.get("/api/status")
+            def ready():
+                state = client.get("/api/status")
+                return state if state["listen_port"] and state["provision"]["status"] == "no_data" else None
+
+            state = wait_for(ready)
             assert state["listen_port"] > 0
             assert state["provider"]
             assert state["provision"]["status"] == "no_data"

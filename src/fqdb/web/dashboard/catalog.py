@@ -93,8 +93,8 @@ class CatalogViews:
     def __init__(self, owner):
         self.owner = owner
 
-    def _snapshot(self, *, catalog_path=None):
-        catalog = self.owner.catalogs.inspect(catalog_path=catalog_path)
+    def _snapshot(self, *, catalog_path=None, scope=None):
+        catalog = self.owner.catalogs.inspect(catalog_path=catalog_path, scope=scope)
         groups = defaultdict(list)
         packages = []
         for package in catalog["packages"]:
@@ -115,13 +115,15 @@ class CatalogViews:
             raise FQDBError(f"数据集目录中没有 {scope}")
         return found
 
-    def summary(self, runtime):
+    def summary(self, runtime, include_runtime="true"):
+        if include_runtime not in ("true", "false"):
+            raise FQDBError("include_runtime must be true or false")
         datasets, packages, groups, issues = self._snapshot()
         tasks = [self.owner.transfers.task_state(task) for task in self.owner.store.tasks(newest_first=True)]
         rows = [_scope_stats(d, groups[d["scope"]]) for d in datasets]
         counts = Counter(p["status"] for p in packages)
         issues = [issue for issue in issues if issue["code"] in ("dataset_descriptor", "package_descriptor")]
-        return {
+        result = {
             "totals": {
                 "registered": len(rows),
                 "published_datasets": sum(r["published"] > 0 for r in rows),
@@ -140,11 +142,13 @@ class CatalogViews:
             "issue_count": len(issues),
             "task_counts": dict(Counter(t["status"] for t in tasks)),
             "latest_task": task_row(tasks[0]) if tasks else None,
-            "runtime": runtime(),
         }
+        if include_runtime == "true":
+            result["runtime"] = runtime()
+        return result
 
     def dataset(self, dataset, frequency):
-        datasets, _, groups, _ = self._snapshot()
+        datasets, _, groups, _ = self._snapshot(scope=f"{dataset}/{frequency}")
         index = self._scope(datasets, dataset, frequency)
         packages = groups[index["scope"]]
         registered = self.owner.store.dataset(dataset, required=False)
@@ -186,7 +190,7 @@ class CatalogViews:
         offset=0,
         limit=40,
     ):
-        datasets, _, groups, _ = self._snapshot()
+        datasets, _, groups, _ = self._snapshot(scope=f"{dataset}/{frequency}")
         index = self._scope(datasets, dataset, frequency)
         packages = groups[index["scope"]]
         months = defaultdict(set)

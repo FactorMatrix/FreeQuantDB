@@ -1,10 +1,11 @@
 from datetime import date, timedelta
+import os
 
 from fastapi.testclient import TestClient
 import pyarrow.parquet as pq
 import pytest
 
-from fqdb.catalog.magnet_manifest import package_path
+from fqdb.catalog.magnet_manifest import dataset_path, json_object, package_path
 from fqdb.config import Config
 from fqdb.publish.paths import immutable_file
 from fqdb.service.core import Owner
@@ -117,6 +118,65 @@ def test_query_reports_missing_symbol(console_client):
     }
     assert client.post("/api/query", json=query).status_code == 400
     assert client.get("/api/console/nonexistent").status_code == 404
+
+
+def test_summary_can_omit_native_status(console_client, monkeypatch):
+    client, owner = console_client
+
+    def reject_status():
+        pytest.fail("Catalog-only summary requested native status")
+
+    monkeypatch.setattr(owner.seeding, "status", reject_status)
+    response = client.get("/api/console/summary", params={"include_runtime": "false"})
+    assert response.status_code == 200
+    assert response.json()["totals"]["published"] == 2
+    assert "runtime" not in response.json()
+    assert client.get("/api/console/summary", params={"include_runtime": "invalid"}).status_code == 400
+
+
+def test_catalog_views_only_inspect_the_selected_scope_or_package(console_client, monkeypatch):
+    from fqdb.catalog import magnet
+
+    client, owner = console_client
+    other = "xx/instrument/reference/1d"
+    root = owner.config.root
+    dataset = root / "catalog" / dataset_path(IDENTITY)
+    atomic_json(root / "catalog" / dataset_path(other), json_object(dataset.read_bytes()))
+    original = owner.store.entries()[0]
+    relative = package_path(IDENTITY, original.period)
+    descriptor = root / "catalog" / relative
+    atomic_json(
+        root / "catalog" / package_path(other, original.period),
+        json_object(descriptor.read_bytes()) | {"magnet": "magnet:?xt=urn:btih:" + "12" * 20},
+    )
+    inspect = magnet.inspect_package
+    inspected = []
+
+    def record_inspection(root, cache_dir, dataset, package, **options):
+        inspected.append(package["path"])
+        return inspect(root, cache_dir, dataset, package, **options)
+
+    monkeypatch.setattr(magnet, "inspect_package", record_inspection)
+    assert all(row["version_status"] == "current" for row in console(client, "browse")["items"])
+    assert len(inspected) == 2 and all(path.startswith(IDENTITY + "/") for path in inspected)
+    inspected.clear()
+    assert console(client, "dataset")["schema"]["query_supported"]
+    assert len(inspected) == 2 and all(path.startswith(IDENTITY + "/") for path in inspected)
+    inspected.clear()
+    package = client.get("/api/console/package", params={"catalog_path": relative}).json()
+    assert package["version_status"] == "current" and inspected == [relative]
+
+    # A replacement with identical size and mtime still invalidates the on-disk evidence.
+    visible = root / original.file
+    stat = visible.stat()
+    replacement = visible.with_suffix(".synthetic-invalid")
+    replacement.write_bytes(b"x" * stat.st_size)
+    os.utime(replacement, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    replacement.replace(visible)
+    changed = client.get("/api/console/package", params={"catalog_path": relative}).json()
+    assert (changed["status"], changed["version_status"], changed["query_supported"]) == (
+        "anomaly", "unknown", False,
+    )
 
 
 def test_light_reads_use_footer_and_bound_multiyear_lists(console_client, monkeypatch):

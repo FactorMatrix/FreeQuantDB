@@ -6,8 +6,7 @@ from datetime import date
 
 from ..catalog.magnet import OFFICIAL_SOURCE, MagnetCatalog
 from ..catalog.models import Entry
-from ..publish.paths import resolve_file
-from ..util import FQDBError, day, now
+from ..util import FQDBError, day, now, safe_path
 
 
 def scope_bounds(start_date=None, end_date=None, year=None, month=None):
@@ -50,29 +49,37 @@ class Catalogs:
         self.owner, self.store, self.config = owner, owner.store, owner.config
         self.catalog = MagnetCatalog(self.store.root)
 
-    def inspect(self, *, deep=False, catalog_path=None):
-        scanned = self.catalog.scan(deep=deep, path=catalog_path)
-        active = {entry.file: (entry, evidence) for entry, evidence in self.store.active()}
-        tasks = {task["id"]: self.owner.transfers.task_state(task) for task in self.store.tasks()}
+    def inspect(self, *, deep=False, catalog_path=None, scope=None):
+        scanned = self.catalog.scan(deep=deep, path=catalog_path, scope=scope)
+        if not scanned["packages"]:
+            return scanned
+        selected = scanned["datasets"][0] if scope is not None or catalog_path is not None else None
+        active = self.store.active_file_evidence((selected["dataset"], selected["frequency"]) if selected else None)
+        identities = {package.get("info_hash") for package in scanned["packages"]} - {None}
+        task_rows = self.store.tasks() if identities else ()
+        tasks = {
+            task["id"]: self.owner.transfers.task_state(task)
+            for task in task_rows
+            if task["id"] in identities
+        }
         for package in scanned["packages"]:
             previous = active.get(package["file"])
             identity = package.get("info_hash")
-            package["local_hash"] = previous[0].info_hash if previous else None
+            package["local_hash"] = previous[0] if previous else None
             package["task"] = tasks.get(identity)
             package["version_status"] = "unknown"
             if previous and package["local_status"] != "missing":
-                if identity and previous[0].info_hash != identity:
+                if identity and previous[0] != identity:
                     # The file on disk belongs to the previously installed package.
                     package["local_status"] = "new_version"
                     package["version_status"] = "new_version"
                 elif package["local_status"] == "available":
-                    entry, evidence = previous
-                    path = resolve_file(self.store.root, entry)
+                    path = safe_path(self.store.root, package["file"])
                     try:
                         stat = path.stat()
                     except FileNotFoundError:
                         continue
-                    if (stat.st_size, stat.st_mtime_ns) == (evidence["size"], evidence["mtime_ns"]):
+                    if (stat.st_size, stat.st_mtime_ns) == previous[1:]:
                         package["version_status"] = "current"
         return scanned
 

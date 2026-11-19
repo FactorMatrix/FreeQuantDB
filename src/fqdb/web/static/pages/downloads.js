@@ -178,7 +178,35 @@ export async function downloads(ctx) {
     <button class="button button-primary" id="plan" type="submit">预览计划</button></div></form>
         </div>
       </details>
-    </div>`;
+    </div>
+    <details class="panel ops-transfer-settings" id="transfer-settings">
+      <summary class="panel-header"><h2>传输设置</h2></summary>
+      <div class="panel-body" id="transfer-settings-content"></div>
+    </details>`;
+  const settings = $("#transfer-settings");
+  let refreshSettings;
+  let settingsRequest;
+  async function updateSettings() {
+    if (!settings.open || !ctx.live()) return;
+    if (settingsRequest) return settingsRequest;
+    settingsRequest = (async () => {
+      if (refreshSettings) {
+        await refreshSettings();
+      } else {
+        const { mountTransferSettings } = await import("../components/transfer-settings.js");
+        if (!ctx.live() || !settings.open) return;
+        refreshSettings = await mountTransferSettings(ctx, $("#transfer-settings-content", settings));
+      }
+    })();
+    try {
+      await settingsRequest;
+    } finally {
+      settingsRequest = null;
+    }
+  }
+  settings.ontoggle = () => {
+    if (settings.open) ctx.run(updateSettings);
+  };
   bindScope(ctx, "download");
   $("#plan").disabled = !ctx.selection().dataset;
   $("#download-planner").ontoggle = (e) => {
@@ -421,5 +449,5 @@ export async function downloads(ctx) {
     });
   };
   await ctx.updateTasks();
-  ctx.poll = () => ctx.updateTasks();
+  ctx.poll = () => Promise.all([ctx.updateTasks(), updateSettings()]);
 }

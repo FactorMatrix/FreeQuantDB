@@ -6,9 +6,6 @@ import {
   label,
   human,
   datasetOptions,
-  pill,
-  rate,
-  num,
   options,
   empty,
 } from "./ui.js";
@@ -50,12 +47,23 @@ function gatewayEnded() {
   gatewayClosed = true;
   gatewayConnection?.close();
   controller?.abort();
+  state.seq++;
+  current = null;
   setConnection("管理界面已退出");
   $("#exit-gateway").disabled = true;
-  $("#view").innerHTML = empty(
+  const view = $("#view");
+  view.removeAttribute("aria-busy");
+  view.inert = false;
+  view.innerHTML = empty(
     "管理界面已退出",
-    "已开始的下载和做种会在后台继续。再次进入请运行 fqdb gateway。",
+    "再次进入请运行 fqdb gateway。",
   );
+}
+
+function updateGateway(session) {
+  if (gatewayClosed) return;
+  if (session.active) setConnection("本地服务在线", true);
+  else gatewayEnded();
 }
 
 async function heartbeatGateway() {
@@ -64,7 +72,7 @@ async function heartbeatGateway() {
     session_id: gatewaySession,
     browser: true,
   });
-  if (!session.active) gatewayEnded();
+  updateGateway(session);
 }
 
 $("#exit-gateway").onclick = () =>
@@ -86,8 +94,9 @@ window.addEventListener("pagehide", () => {
       }),
     );
 });
-window.addEventListener("pageshow", () => {
-  if (gatewaySession && !gatewayClosed) heartbeatGateway().catch(showError);
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted && gatewaySession && gatewayConnection?.readyState !== EventSource.OPEN)
+    heartbeatGateway().catch(showError);
 });
 
 async function request(path, body, signal) {
@@ -127,7 +136,7 @@ function toast(text) {
   toastTimer = setTimeout(() => ($("#toast").hidden = true), 4500);
 }
 function showError(error) {
-  if (error.name === "AbortError") return;
+  if (gatewayClosed || error.name === "AbortError") return;
   let message = error.message || String(error);
   if (
     message.includes("Missing=") ||
@@ -146,14 +155,12 @@ function showError(error) {
 async function run(fn) {
   state.busy++;
   $("#error").hidden = true;
-  $("#activity").textContent = "正在处理…";
   try {
     await fn();
   } catch (e) {
     showError(e);
   } finally {
     state.busy--;
-    if (!state.busy) $("#activity").textContent = "";
   }
 }
 function selection() {
@@ -222,20 +229,6 @@ function fillContext() {
   $("#start").value = state.start || "";
   $("#end").value = state.end || "";
 }
-function paintRuntime(runtime) {
-  setConnection("本地服务在线", true);
-  const seeding = runtime.provider
-    ? "做种已开启"
-    : runtime.settings.auto_seed === false ? "做种已暂停" : "做种未开启";
-  const transfer = $("#overview-runtime");
-  if (transfer) transfer.innerHTML = `
-    <div class="overview-transfer-mode">${pill(runtime.provider ? "local" : "pending", seeding)}</div>
-    <dl class="overview-transfer-rates">
-      <div><dt>下载</dt><dd>${rate(runtime.download_rate)}</dd></div>
-      <div><dt>上传</dt><dd>${rate(runtime.upload_rate)}</dd></div>
-      <div><dt>节点连接</dt><dd>${num(runtime.peer_connections)}</dd></div>
-    </dl>`;
-}
 function acceptSummary(data) {
   state.summary = data;
   if (
@@ -254,16 +247,15 @@ function acceptSummary(data) {
       state.selection = { dataset: "", frequency: "" };
       setRange("", "");
     }
-  }
+  } else fillContext();
   const running = Object.entries(data.task_counts)
     .filter(([s]) => !["complete", "failed", "cancelled", "paused"].includes(s))
     .reduce((n, [, v]) => n + v, 0);
   $("#nav-task-count").hidden = !running;
   $("#nav-task-count").textContent = running;
-  paintRuntime(data.runtime);
 }
 async function reloadSummary() {
-  const data = await request("/api/console/summary");
+  const data = await request("/api/console/summary?include_runtime=false");
   acceptSummary(data);
   return data;
 }
@@ -275,7 +267,7 @@ function navigate(page, values = {}) {
   else location.hash = hash;
 }
 async function render() {
-  if (!state.summary) return;
+  if (!state.summary || gatewayClosed) return;
   controller?.abort();
   controller = new AbortController();
   const { signal } = controller;
@@ -310,7 +302,7 @@ async function render() {
     );
   });
   const section = $("#section-nav");
-  const tabs = sectionTabs(active);
+  const tabs = route.hideSectionTabs ? [] : sectionTabs(active);
   section.hidden = tabs.length === 0;
   section.innerHTML = tabs
     .map(
@@ -334,7 +326,10 @@ async function render() {
     (b) => (b.onclick = () => navigate(b.dataset.heading)),
   );
   $("#error").hidden = true;
-  $("#view").innerHTML = empty("正在读取本地状态…");
+  const view = $("#view");
+  if (changedRoute) view.replaceChildren();
+  view.setAttribute("aria-busy", "true");
+  view.inert = true;
   const ctx = {
     state,
     get summary() {
@@ -349,7 +344,6 @@ async function render() {
     render,
     run,
     toast,
-    paintRuntime,
     acceptSummary,
     reloadSummary,
     live: () => seq === state.seq,
@@ -367,7 +361,7 @@ async function render() {
   bindCatalogRefresh(ctx);
   try {
     if (!state.selection.dataset && route.scope)
-      $("#view").innerHTML = empty(
+      view.innerHTML = empty(
         "本地目录没有数据集",
         "更新磁力链接，或将数据集索引和包说明放入本地 catalog。",
       );
@@ -375,10 +369,15 @@ async function render() {
   } catch (e) {
     if (e.name !== "AbortError" && ctx.live()) {
       showError(e);
-      $("#view").innerHTML = empty(
+      view.innerHTML = empty(
         "当前页面尚未加载完成",
         "修正范围或检查服务后，可点击刷新重试。",
       );
+    }
+  } finally {
+    if (ctx.live()) {
+      view.removeAttribute("aria-busy");
+      view.inert = false;
     }
   }
 }
@@ -412,21 +411,24 @@ $("#package-detail").onclick = (e) => {
 };
 window.addEventListener("hashchange", () => run(render));
 setInterval(async () => {
-  if (gatewayClosed) return;
-  try {
-    await heartbeatGateway();
-  } catch {
-    setConnection("服务连接中断");
-    return;
-  }
-  if (polling || state.busy || !current) return;
+  if (gatewayClosed || polling) return;
   polling = true;
   try {
-    const runtime = await request("/api/console/runtime");
-    paintRuntime(runtime);
-    if (current.poll) await current.poll(runtime);
-  } catch (e) {
-    if (e.name !== "AbortError") setConnection("服务连接中断");
+    if (gatewaySession && gatewayConnection?.readyState !== EventSource.OPEN) {
+      try {
+        await heartbeatGateway();
+      } catch {
+        if (!gatewayClosed) setConnection("服务连接中断");
+        return;
+      }
+    }
+    const ctx = current;
+    if (gatewayClosed || state.busy || document.hidden || !ctx?.poll) return;
+    try {
+      await ctx.poll();
+    } catch (e) {
+      if (ctx.live() && e.name !== "AbortError") showError(e);
+    }
   } finally {
     polling = false;
   }
@@ -438,13 +440,11 @@ run(async () => {
     address.searchParams.set("session", gatewaySession);
     history.replaceState(null, "", address);
   }
-  await heartbeatGateway();
-  if (gatewayClosed) return;
   gatewayConnection = new EventSource("/api/gateway/" + gatewaySession);
-  gatewayConnection.onmessage = (event) => {
-    if (!JSON.parse(event.data).active) gatewayEnded();
+  gatewayConnection.onmessage = (event) => updateGateway(JSON.parse(event.data));
+  gatewayConnection.onerror = () => {
+    if (!gatewayClosed) setConnection("服务连接中断");
   };
-  await reloadSummary();
-  fillContext();
+  await Promise.all([heartbeatGateway(), reloadSummary()]);
   await render();
 });

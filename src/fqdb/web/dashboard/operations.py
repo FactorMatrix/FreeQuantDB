@@ -11,6 +11,13 @@ class OperationViews:
         self.owner = owner
         self.store = owner.store
 
+    def settings(self):
+        return {
+            "settings": self.owner.config.read(),
+            "data_dir": str(self.store.root),
+            "subscriptions": self.store.subscriptions(),
+        }
+
     def runtime(self):
         with self.owner.lock:
             transfers = self.owner.transfer_status()

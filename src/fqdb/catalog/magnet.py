@@ -127,13 +127,19 @@ class MagnetCatalog:
             self._recover()
             raise
 
-    def _paths(self, pattern):
-        return sorted(path.relative_to(self.directory).as_posix() for path in self.directory.rglob(pattern))
+    def _paths(self, pattern, scope=None):
+        directory = self.directory / scope if scope else self.directory
+        return sorted(path.relative_to(self.directory).as_posix() for path in directory.rglob(pattern))
 
-    def _scan(self, *, deep=False, path=None, changed=()):
+    def _scan(self, *, deep=False, path=None, scope=None, changed=()):
         issues = []
         datasets = {}
-        for relative in self._paths("index.json"):
+        if path is not None:
+            if not isinstance(path, str) or not path.endswith(".parquet.json"):
+                raise FQDBError("Expected a Parquet package descriptor path")
+            scope = "/".join(path.split("/")[:4])
+        index_paths = [dataset_path(scope)] if scope is not None else self._paths("index.json")
+        for relative in index_paths:
             if relative == "index.json":
                 continue
             try:
@@ -142,9 +148,8 @@ class MagnetCatalog:
             except (OSError, FQDBError) as exc:
                 issues.append(problem(relative, "dataset_descriptor", str(exc)))
         packages = []
-        for relative in self._paths("*.parquet.json"):
-            if path is not None and relative != path:
-                continue
+        package_paths = [path] if path is not None else self._paths("*.parquet.json", scope)
+        for relative in package_paths:
             scope = "/".join(relative.split("/")[:4])
             if scope not in datasets:
                 continue
@@ -168,10 +173,10 @@ class MagnetCatalog:
             packages.append(package)
         return {"datasets": list(datasets.values()), "packages": packages, "issues": issues, "errors": issues}
 
-    def scan(self, *, deep=False, path=None):
+    def scan(self, *, deep=False, path=None, scope=None):
         """Discover files first, then compare descriptors to local Parquet evidence."""
         with self._locked():
-            return self._scan(deep=deep, path=path)
+            return self._scan(deep=deep, path=path, scope=scope)
 
     def _read_remote(self, source):
         with httpx.Client() as client:

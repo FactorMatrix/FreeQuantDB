@@ -67,17 +67,17 @@ def main():
             process, url = start_gateway()
             page.goto(url)
             expect(page.locator("#connection")).to_contain_text("本地服务在线")
-            for name in ("overview", "datasets", "downloads", "validation", "provider", "settings"):
+            for name in ("overview", "datasets", "downloads", "validation", "settings"):
                 page.locator(f'.sidebar [data-page="{name}"]').click()
                 expect(page.locator("#view")).not_to_contain_text("当前页面尚未加载完成")
                 expect(page.locator("#view")).not_to_contain_text("正在读取本地状态…")
-                if name == "provider":
-                    expect(page.locator("#provider-state")).to_have_text("做种已开启")
-                    expect(page.locator("#provider-message")).to_have_text("暂无可做种数据")
+                if name == "downloads":
+                    expect(page.locator("#transfer-settings")).to_be_visible()
+                    expect(page.locator("#provider-state")).to_have_count(0)
             page.locator('.sidebar [data-page="overview"]').click()
             page.screenshot(path=str(evidence / "gateway-open.png"), full_page=True)
             checks.append(
-                "Six real management pages open with automatic sharing enabled and no packages to seed."
+                "Five real management pages open without foreground sharing reminders."
             )
             page.reload()
             expect(page.locator("#connection")).to_contain_text("本地服务在线")
