@@ -1,14 +1,20 @@
+import base64
 import json
 from pathlib import Path
 import time
+from types import SimpleNamespace
+from urllib.parse import quote
 
 import libtorrent as lt
+import pytest
 
 from fqdb.bt.engine import Engine
 from fqdb.bt.torrents import (
     create_metadata,
     magnet_hash,
+    make_magnet,
     metadata_torrent,
+    parse_magnet,
     torrent_cache_path,
     validate_daily,
 )
@@ -21,6 +27,7 @@ from fqdb.publish.catalog import export_public_catalog
 from fqdb.publish.paths import immutable_file
 from fqdb.publish.publisher import Publisher, import_native_publication
 from fqdb.storage.metadata import Store
+from fqdb.util import FQDBError
 
 
 def _producer(root):
@@ -84,6 +91,42 @@ def test_explicit_native_import_preserves_original_hash_and_tracker(data_root):
     assert "tracker.example" in converted.magnet
     assert torrent_cache_path(receiver.root, converted).read_bytes() == legacy
     assert not list(receiver.root.rglob("*.torrent"))
+
+
+def test_native_metadata_writer_preserves_original_binary_info_section():
+    raw = (
+        b"d6:pieces20:"
+        + bytes(range(0x80, 0x94))
+        + b"4:name12:2004.parquet12:piece lengthi16384e6:lengthi1ee"
+    )
+    original = lt.torrent_info(b"d4:info" + raw + b"e")
+    first = "http://127.0.0.1:9001/announce"
+    second = "http://127.0.0.1:9002/announce"
+    encoded = metadata_torrent(original, [{"url": second, "tier": 1}, {"url": first, "tier": 0}])
+    restored = lt.torrent_info(encoded)
+    assert bytes(restored.info_section()) == raw
+    assert restored.info_hashes().v1 == original.info_hashes().v1
+    assert [(tracker.url, tracker.tier) for tracker in restored.trackers()] == [(first, 0), (second, 1)]
+
+
+def test_native_magnets_keep_unambiguous_v1_identity_and_tracker_options():
+    identity = "ab" * 20
+    tracker = "http://127.0.0.1:9001/announce"
+    entry = SimpleNamespace(info_hash=identity, file="data/2004.parquet")
+    generated = lt.parse_magnet_uri(make_magnet(entry, [tracker, tracker]))
+    assert str(generated.info_hashes.v1) == identity
+    assert generated.name == "2004.parquet" and generated.trackers == [tracker]
+
+    base32 = base64.b32encode(bytes.fromhex(identity)).decode("ascii")
+    prefix = f"MAGNET:?xt={quote('urn:btih:' + identity)}&tr={quote(tracker)}"
+    accepted = parse_magnet(f"{prefix}&xt.1=URN:BTIH:{base32}")
+    assert str(accepted.info_hashes.v1) == identity and accepted.trackers == [tracker]
+    with pytest.raises(FQDBError, match="unambiguous"):
+        parse_magnet(f"{prefix}&XT.2=urn:btih:{'cd' * 20}")
+    with pytest.raises(FQDBError, match="v1"):
+        parse_magnet(f"{prefix}&xt=urn:btmh:1220{'ab' * 32}")
+    with pytest.raises(FQDBError, match="v1"):
+        parse_magnet(f"magnet:?xt=urn:btih:{'z' * 40}")
 
 
 def test_catalog_transport_accepts_new_market_scope_without_producer_schema(data_root):

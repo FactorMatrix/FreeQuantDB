@@ -11,8 +11,8 @@ import libtorrent as lt
 from .torrents import (
     MAX_METADATA,
     inspect,
-    magnet_hash,
     metadata_torrent,
+    parse_magnet,
     torrent_cache_path,
     validate_daily,
     validate_info,
@@ -103,12 +103,12 @@ class Engine:
         params.ti = info
         params.save_path = str(save_path)
         if magnet:
-            if magnet_hash(magnet) != identity:
+            advertised = parse_magnet(magnet)
+            if str(advertised.info_hashes.v1) != identity:
                 raise FQDBError("Magnet does not match the verified metadata")
-            advertised = list(lt.parse_magnet_uri(magnet).trackers)
-            if advertised:
+            if advertised.trackers:
                 trackers = {tracker.url: tracker.tier for tracker in info.trackers()}
-                for url in advertised:
+                for url in advertised.trackers:
                     trackers.setdefault(url, 0)
                 params.trackers = list(trackers)
                 params.tracker_tiers = list(trackers.values())
@@ -131,11 +131,12 @@ class Engine:
         return handle
 
     def add_magnet(self, identity, magnet, save_path):
-        if magnet_hash(magnet) != identity:
+        params = parse_magnet(magnet)
+        if str(params.info_hashes.v1) != identity:
             raise FQDBError("Magnet info-hash does not match trusted manifest")
         if identity in self.handles:
             return self.handles[identity]
-        params = self.prepare(lt.parse_magnet_uri(magnet))
+        self.prepare(params)
         params.save_path = str(save_path)
         # In libtorrent 2.0 upload_mode permits BEP-9 metadata exchange while
         # blocking piece requests. default_dont_download adds a second gate when

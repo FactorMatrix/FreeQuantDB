@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 from pathlib import Path
-from urllib.parse import parse_qs, urlencode, urlparse
+import re
+from urllib.parse import unquote_plus, urlparse
 
 import libtorrent as lt
 
@@ -90,21 +89,21 @@ def validate_daily(payload, entry, root):
 
 
 def metadata_torrent(info, trackers=()):
-    # Preserve the original bencoded info section byte-for-byte and thus its hash.
-    tiers = {}
-    for tracker in trackers:
-        tiers.setdefault(tracker["tier"], []).append(tracker["url"].encode("utf-8"))
-    extra = b""
-    if tiers:
-        announce = [tiers[tier] for tier in sorted(tiers)]
-        extra = lt.bencode({b"announce": announce[0][0], b"announce-list": announce})[1:-1]
-    return b"d" + extra + b"4:info" + bytes(info.info_section()) + b"e"
+    # The native writer retains the original encoded info dictionary.
+    params = lt.add_torrent_params()
+    params.ti = info
+    ordered = sorted(trackers, key=lambda tracker: tracker["tier"])
+    params.trackers = [tracker["url"] for tracker in ordered]
+    params.tracker_tiers = [tracker["tier"] for tracker in ordered]
+    return lt.bencode(lt.write_torrent_file(params))
 
 
 def make_magnet(entry, trackers=()):
-    parameters = [("xt", "urn:btih:" + entry.info_hash), ("dn", Path(entry.file).name)]
-    parameters.extend(("tr", url) for url in dict.fromkeys(trackers))
-    return "magnet:?" + urlencode(parameters)
+    params = lt.add_torrent_params()
+    params.info_hashes = lt.info_hash_t(lt.sha1_hash(bytes.fromhex(entry.info_hash)))
+    params.name = Path(entry.file).name
+    params.trackers = list(dict.fromkeys(trackers))
+    return lt.make_magnet_uri(params)
 
 
 def torrent_cache_path(root, entry):
@@ -114,32 +113,92 @@ def torrent_cache_path(root, entry):
     return immutable_metadata(root, entry)
 
 
-def magnet_hash(uri):
+_TOPIC = re.compile(r"xt(?:\.[0-9]*)?", flags=re.IGNORECASE | re.ASCII)
+_V1_TOPIC = re.compile(r"urn:btih:([0-9a-f]{40}|[a-z2-7]{32})", flags=re.IGNORECASE | re.ASCII)
+
+
+def parse_magnet(uri):
+    """Pass magnet decoding to libtorrent after enforcing a single v1 identity."""
     if not isinstance(uri, str) or len(uri) > 16384:
         raise FQDBError("Invalid or oversized magnet link")
-    value = urlparse(uri)
+    try:
+        value = urlparse(uri)
+    except ValueError as exc:
+        raise FQDBError("Invalid magnet link") from exc
     if value.scheme != "magnet" or value.netloc or value.path or value.fragment:
         raise FQDBError("Invalid magnet link")
-    hashes = []
-    for xt in parse_qs(value.query).get("xt", []):
-        if not xt.lower().startswith("urn:btih:"):
-            raise FQDBError("Only v1 btih magnets are supported")
-        h = xt[9:]
-        try:
-            raw = bytes.fromhex(h) if len(h) == 40 else base64.b32decode(h.upper()) if len(h) == 32 else b""
-        except (ValueError, TypeError) as exc:
-            raise FQDBError("Invalid magnet hash") from exc
-        if len(raw) != 20:
-            raise FQDBError("Invalid magnet hash")
-        hashes.append(raw.hex())
-    if not hashes or len(set(hashes)) != 1:
+    topics = []
+    options = []
+    for field in value.query.split("&"):
+        name, _, payload = field.partition("=")
+        if not _TOPIC.fullmatch(unquote_plus(name)):
+            if field:
+                options.append(field)
+            continue
+        topic = _V1_TOPIC.fullmatch(unquote_plus(payload))
+        if not topic:
+            raise FQDBError("Only valid v1 btih magnet hashes are supported")
+        topics.append(topic[1])
+    if not topics:
         raise FQDBError("Magnet requires one unambiguous v1 info-hash")
-    return hashes[0]
+    # Some supported libtorrent versions accept conflicting xt fields by
+    # retaining the last one. Give the parser one topic at a time.
+    normalized = "&".join([f"magnet:?xt=urn:btih:{topics[0]}", *options])
+    try:
+        params = lt.parse_magnet_uri(normalized)
+        identity = params.info_hashes
+        if not identity.has_v1() or identity.has_v2():
+            raise FQDBError("Invalid magnet hash")
+        for topic in topics[1:]:
+            other = lt.parse_magnet_uri(f"magnet:?xt=urn:btih:{topic}").info_hashes
+            if other.v1 != identity.v1:
+                raise FQDBError("Magnet requires one unambiguous v1 info-hash")
+    except RuntimeError as exc:
+        raise FQDBError("Invalid magnet link") from exc
+    return params
+
+
+def magnet_hash(uri):
+    return str(parse_magnet(uri).info_hashes.v1)
 
 
 def verify_pieces(info, path):
-    with open(path, "rb") as f:
-        for i in range(info.num_pieces()):
-            if hashlib.sha1(f.read(info.piece_size(i))).digest() != info.hash_for_piece(i):
-                return False
-    return True
+    """Check local bytes against the original torrent using libtorrent's disk checker."""
+    path = Path(path)
+    if info.num_files() != 1 or path.stat().st_size != info.total_size():
+        return False
+
+    # A short-lived offline check leaves active peers and their resume state alone.
+    categories = lt.alert.category_t
+    session = lt.session(
+        {
+            "listen_interfaces": "",
+            "enable_dht": False,
+            "enable_lsd": False,
+            "enable_upnp": False,
+            "enable_natpmp": False,
+            "enable_outgoing_tcp": False,
+            "enable_outgoing_utp": False,
+            "alert_mask": int(
+                categories.error_notification
+                | categories.status_notification
+                | categories.storage_notification
+            ),
+        }
+    )
+    flags = lt.torrent_flags
+    params = lt.add_torrent_params()
+    params.ti = info
+    params.save_path = str(path.parent.resolve())
+    params.renamed_files = {0: path.name}
+    params.flags &= ~(flags.auto_managed | flags.paused | flags.seed_mode)
+    params.flags |= flags.upload_mode | flags.disable_pex | flags.override_trackers | flags.override_web_seeds
+    session.add_torrent(params)
+    # With no resume data, the native session checks the original piece hashes.
+    while True:
+        session.wait_for_alert(500)
+        for alert in session.pop_alerts():
+            if isinstance(alert, lt.torrent_checked_alert):
+                return alert.handle.status().is_seeding
+            if isinstance(alert, (lt.file_error_alert, lt.torrent_error_alert)):
+                raise FQDBError(alert.message())
