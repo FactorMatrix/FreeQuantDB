@@ -9,8 +9,8 @@ def base_dataset(asset="stock", *, market=DEFAULT_MARKET):
     return Dataset(
         id=f"{market}/{asset}/base",
         frequencies=list(FREQUENCIES),
-        fields=market_fields("1d"),
-        frequency_fields={f: market_fields(f) for f in FREQUENCIES},
+        fields=market_fields("1d", asset=asset),
+        frequency_fields={f: market_fields(f, asset=asset) for f in FREQUENCIES},
         primary_key=market_primary_key("1d"),
         timezone=market_info.timezone,
         source="No real provider configured",
@@ -34,6 +34,4 @@ def base_dataset(asset="stock", *, market=DEFAULT_MARKET):
 def install_defaults(store):
     for market, contract in MARKET_CONTRACTS.items():
         for asset in contract.assets:
-            dataset = base_dataset(asset, market=market)
-            if store.dataset(dataset.id, required=False) is None:
-                store.register(dataset)
+            store.register_default(base_dataset(asset, market=market))

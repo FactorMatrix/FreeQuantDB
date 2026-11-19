@@ -143,8 +143,8 @@ def _market_errors(frame, schema, trading_date, trading_dates, check_units):
         | (frame.low > frame[["open", "close", "high"]].min(axis=1))
     ).any():
         failures.append("invalid OHLC range")
-    for column in ("volume", "amount"):
-        if (frame[column].dropna() < 0).any():
+    for column in ("volume", "amount", "open_interest"):
+        if column in schema.fields and (frame[column].dropna() < 0).any():
             failures.append(f"negative {column}")
     dates = _source_dates(frame, schema, trading_date, trading_dates)
     if dates is None:

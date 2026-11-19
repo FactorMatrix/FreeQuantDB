@@ -18,9 +18,9 @@ from fqdb.storage.metadata import Store
 from fqdb.planning.planner import plan
 
 
-@pytest.mark.parametrize("asset", ["stock", "etf", "future"])
+@pytest.mark.parametrize("asset,daily_columns", [("stock", 9), ("etf", 9), ("future", 14)])
 @pytest.mark.parametrize("frequency", ["1d", "1m"])
-def test_all_market_assets_exact_types_and_day_month_year(data_root, asset, frequency):
+def test_all_market_assets_exact_types_and_day_month_year(data_root, asset, daily_columns, frequency):
     Config(data_root).ensure()
     store = Store(data_root)
     days = ["2026-11-13", "2026-11-17"]
@@ -33,9 +33,9 @@ def test_all_market_assets_exact_types_and_day_month_year(data_root, asset, freq
         entry = Entry(**body)
         assert Path(entry.file).name == entry.trading_date.replace("-", "") + ".parquet"
         assert ".v" not in entry.file
-        assert pq.read_schema(data_root / entry.file) == arrow_schema(schema, frequency)
-        assert len(pq.read_schema(data_root / entry.file)) == (9 if frequency == "1d" else 8)
         parquet = pq.ParquetFile(data_root / entry.file)
+        assert parquet.schema_arrow == arrow_schema(schema, frequency)
+        assert len(parquet.schema_arrow) == (daily_columns if frequency == "1d" else 8)
         assert entry.day_groups == {entry.trading_date: list(range(parquet.num_row_groups))}
         physical = parquet.read().to_pandas()
         assert physical.equals(

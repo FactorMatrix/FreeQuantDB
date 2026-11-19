@@ -14,13 +14,16 @@ from fqdb.demo import market_frame, market_schema
 from fqdb.config import Config
 from fqdb.catalog.magnet import MagnetCatalog
 from fqdb.publish.publisher import Publisher
-from fqdb.schema import Dataset, arrow_schema, base_dataset, validate_instrument
+from fqdb.schema import Dataset, arrow_schema, base_dataset, market_fields, validate_instrument
 from fqdb.schema.assets import AssetContract, MARKET_CONTRACTS, MarketContract
 from fqdb.schema.market import DAILY_FIELDS, MINUTE_FIELDS
+from fqdb.service.core import Owner
 from fqdb.storage.metadata import Store
 from fqdb.storage.query import get_price
 from fqdb.util import FQDBError
 from fqdb.validation.quality import validate
+
+FUTURES_EXTRA_COLUMNS = ("settlement", "prev_settlement", "open_interest", "limit_up", "limit_down")
 
 
 @pytest.mark.parametrize("asset", ["stock", "etf", "future"])
@@ -30,6 +33,8 @@ def test_exact_market_columns_physical_types_and_compression(data_root, asset, f
     original = market_frame(asset, frequency, night=asset == "future")
     validated = validate(original, schema)
     expected = DAILY_FIELDS if frequency == "1d" else MINUTE_FIELDS
+    if asset == "future" and frequency == "1d":
+        expected = expected | dict.fromkeys(FUTURES_EXTRA_COLUMNS, "float64")
     assert validated.columns.tolist() == list(expected)
     assert isinstance(validated.index, pd.RangeIndex)
     table = pa.Table.from_pandas(validated, schema=arrow_schema(schema), preserve_index=False)
@@ -43,6 +48,8 @@ def test_exact_market_columns_physical_types_and_compression(data_root, asset, f
     if frequency == "1d":
         assert physical.field("trading_date").type == pa.date32()
         assert "prev_close" in physical.names
+        if asset == "future":
+            assert all(physical.field(column).type == pa.float64() for column in FUTURES_EXTRA_COLUMNS)
     else:
         assert physical.field("trading_time").type == pa.timestamp("us", tz="Asia/Shanghai")
         assert "prev_close" not in physical.names and "trading_date" not in physical.names
@@ -57,10 +64,47 @@ def test_current_contract_roundtrip_frequency_selection(asset):
     # JSON maps may be serialized in canonical key order; physical order remains contractual.
     roundtrip = Dataset(**json.loads(json.dumps(schema.to_dict(), sort_keys=True)))
     assert roundtrip.id == f"cn/{asset}/base" and roundtrip.format_version == 2
-    assert list(roundtrip.for_frequency("1d").fields) == list(DAILY_FIELDS)
+    assert list(roundtrip.for_frequency("1d").fields) == list(market_fields("1d", asset=asset))
     assert list(roundtrip.for_frequency("1m").fields) == list(MINUTE_FIELDS)
     assert roundtrip.for_frequency("1m").primary_key == ["instrument", "trading_time"]
     assert "prev_close" not in roundtrip.fields_for("1m")
+
+
+@pytest.mark.parametrize("custom", [False, True])
+def test_worker_refreshes_only_unchanged_default_field_declarations(data_root, custom):
+    config = Config(data_root).ensure()
+    store = Store(config.root)
+    former = base_dataset("future").to_dict()
+    former["fields"] = DAILY_FIELDS
+    former["frequency_fields"]["1d"] = DAILY_FIELDS
+    if custom:
+        former["source"] = "Synthetic user registry"
+    with store.db() as connection:
+        connection.execute("INSERT INTO datasets VALUES (?, ?)", (former["id"], json.dumps(former)))
+
+    owner = Owner(config)
+    try:
+        assert owner.store.dataset("cn/stock/base").fields == DAILY_FIELDS
+        assert owner.store.dataset("cn/etf/base").fields == DAILY_FIELDS
+        if custom:
+            assert former in owner.store.datasets()
+        else:
+            assert owner.store.dataset(former["id"]).to_dict() == base_dataset("future").to_dict()
+    finally:
+        owner.close()
+
+
+def test_futures_daily_requires_settlement_fields_and_accepts_zero_records():
+    schema = market_schema("future", frequency="1d")
+    frame = market_frame("future", "1d")
+    for column in FUTURES_EXTRA_COLUMNS:
+        with pytest.raises(FQDBError, match=f"missing=\\['{column}'\\]"):
+            validate(frame.drop(columns=column), schema)
+    recorded_zeros = frame.assign(**dict.fromkeys(FUTURES_EXTRA_COLUMNS, 0.0))
+    validated = validate(recorded_zeros, schema)
+    assert not validated[list(FUTURES_EXTRA_COLUMNS)].to_numpy().any()
+    with pytest.raises(FQDBError, match="negative open_interest"):
+        validate(frame.assign(open_interest=-1.0), schema)
 
 
 def test_market_registry_isolates_paths_catalog_and_queries(data_root, monkeypatch):

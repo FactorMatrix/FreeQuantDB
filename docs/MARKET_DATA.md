@@ -22,12 +22,13 @@ data/cn/stock/base/1d/2005/2005.parquet
 
 | 频率 | 字段 |
 | --- | --- |
-| 日线 | `instrument`、`trading_date`、`open`、`high`、`low`、`close`、`volume`、`amount`、`prev_close` |
+| 日线通用 | `instrument`、`trading_date`、`open`、`high`、`low`、`close`、`volume`、`amount`、`prev_close` |
+| 期货日线新增 | `settlement`、`prev_settlement`、`open_interest`、`limit_up`、`limit_down` |
 | 分钟 | `instrument`、`trading_time`、`open`、`high`、`low`、`close`、`volume`、`amount` |
 
 `instrument` 是字符串，`trading_date` 是日期，`trading_time` 含时区，量价字段是双精度数值。SDK 按本地数据离线查询。缺少可信交易日证据时，跨夜记录的所属交易日显示为待核对。
 
-期货 `instrument` 包含合约代码和交易所后缀。大商所 `L`、`PP` 和 `V` 的月均价合约保留代码中的 `F`，例如 `L2602F.DCE`。
+期货 `instrument` 包含合约代码和交易所后缀。大商所 `L`、`PP` 和 `V` 的月均价合约保留代码中的 `F`，例如 `L2602F.DCE`。[期货日线字段口径](../catalog/cn/future/base/1d/README.md)
 
 ## 下载与核对
 

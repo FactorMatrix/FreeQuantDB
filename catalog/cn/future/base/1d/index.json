@@ -10,7 +10,12 @@
     "close",
     "volume",
     "amount",
-    "prev_close"
+    "prev_close",
+    "settlement",
+    "prev_settlement",
+    "open_interest",
+    "limit_up",
+    "limit_down"
   ],
   "instrument_column": "instrument",
   "time_column": "trading_date"

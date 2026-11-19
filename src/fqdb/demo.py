@@ -45,7 +45,7 @@ def market_frame(
     night=False,
     timezone="Asia/Shanghai",
 ):
-    """Return exactly nine/eight synthetic columns and external source-day metadata.
+    """Return synthetic market columns for the asset and frequency, with source-day metadata.
 
     ``night=True`` uses a preceding natural evening only to construct a known
     synthetic test case. Production partitioning never performs this inference.
@@ -79,8 +79,16 @@ def market_frame(
                 )
                 if frequency == "1d":
                     record["prev_close"] = 9.5
+                    if asset == "future":
+                        record.update(
+                            settlement=price + 0.125,
+                            prev_settlement=9.625,
+                            open_interest=240.0,
+                            limit_up=price + 2,
+                            limit_down=price - 2,
+                        )
                 records.append(record)
                 source_days.append(d)
-    result = pd.DataFrame(records, columns=list(market_fields(frequency)))
+    result = pd.DataFrame(records, columns=list(market_fields(frequency, asset=asset)))
     result.attrs["trading_dates"] = source_days
     return result

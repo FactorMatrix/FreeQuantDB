@@ -58,15 +58,17 @@ class Dataset:
         current = self.active_frequency or ("1d" if "trading_date" in self.fields else "1m")
         if current not in self.frequencies:
             raise FQDBError("Concrete schema frequency is not declared")
-        if self.fields != market_fields(current):
+        asset = self.asset
+        expected = market_fields(current, asset=asset)
+        if self.fields != expected:
             raise FQDBError(f"Market {current} schema fields, order and types must match the strict contract")
-        self.fields = market_fields(current)
+        self.fields = expected
         if self.primary_key != market_primary_key(current):
             raise FQDBError("Market primary key must contain instrument and the declared time column")
         for frequency, fields in self.frequency_fields.items():
-            if frequency not in self.frequencies or fields != market_fields(frequency):
+            if frequency not in self.frequencies or fields != market_fields(frequency, asset=asset):
                 raise FQDBError(f"Invalid frequency-specific market contract: {frequency}")
-            self.frequency_fields[frequency] = market_fields(frequency)
+            self.frequency_fields[frequency] = market_fields(frequency, asset=asset)
         if not isinstance(self.units_confirmed, bool):
             raise FQDBError("units_confirmed must be a boolean declaration")
         if not self.timestamp_meaning.strip() or not self.trading_date_rule.strip():
@@ -89,7 +91,7 @@ class Dataset:
             raise FQDBError(f"Frequency not declared in dataset: {frequency}")
         from .market import market_fields
 
-        return dict(self.frequency_fields.get(frequency) or market_fields(frequency))
+        return dict(self.frequency_fields.get(frequency) or market_fields(frequency, asset=self.asset))
 
     def for_frequency(self, frequency):
         fields = self.fields_for(frequency)

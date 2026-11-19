@@ -106,6 +106,22 @@ class Store:
                 (dataset.id, json.dumps(dataset.to_dict())),
             )
 
+    def register_default(self, dataset):
+        """Install or refresh generated fields on an uncustomized registry entry."""
+        current = dataset.to_dict()
+        encoded = json.dumps(current)
+        with self.db() as c:
+            row = c.execute("SELECT body FROM datasets WHERE id=?", (dataset.id,)).fetchone()
+            if row is None:
+                c.execute("INSERT OR IGNORE INTO datasets VALUES(?,?)", (dataset.id, encoded))
+                return
+            saved = json.loads(row[0])
+            derived = {"fields", "frequency_fields"}
+            if saved != current and all(
+                key in derived or saved.get(key) == current.get(key) for key in saved.keys() | current.keys()
+            ):
+                c.execute("UPDATE datasets SET body=? WHERE id=? AND body=?", (encoded, dataset.id, row[0]))
+
     def dataset(self, id, required=True):
         with self.db() as c:
             row = c.execute("SELECT body FROM datasets WHERE id=?", (id,)).fetchone()

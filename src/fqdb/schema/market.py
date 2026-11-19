@@ -15,13 +15,19 @@ DAILY_FIELDS = {
     **dict.fromkeys(VALUES, "float64"),
     "prev_close": "float64",
 }
+FUTURES_DAILY_FIELDS = {
+    **DAILY_FIELDS,
+    **dict.fromkeys(("settlement", "prev_settlement", "open_interest", "limit_up", "limit_down"), "float64"),
+}
 MINUTE_FIELDS = {"instrument": "string", "trading_time": "timestamp", **dict.fromkeys(VALUES, "float64")}
 
 
-def market_fields(frequency):
-    if frequency not in FREQUENCIES:
-        raise FQDBError(f"Market format supports 1d or 1m, not {frequency!r}")
-    return dict(DAILY_FIELDS if frequency == "1d" else MINUTE_FIELDS)
+def market_fields(frequency, *, asset="stock"):
+    if frequency == "1d":
+        return dict(FUTURES_DAILY_FIELDS if asset == "future" else DAILY_FIELDS)
+    if frequency == "1m":
+        return dict(MINUTE_FIELDS)
+    raise FQDBError(f"Market format supports 1d or 1m, not {frequency!r}")
 
 
 def market_primary_key(frequency):

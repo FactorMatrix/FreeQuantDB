@@ -52,7 +52,7 @@ def test_six_formats_independent_day_month_year_bt_and_offline_queries(data_root
             source.call("register", schema.to_dict())
             for frequency in ("1d", "1m"):
                 scope = {"dataset": schema.id, "frequency": frequency}
-                scopes.append(scope | {"instrument": target})
+                scopes.append(scope | {"instrument": target, "asset": asset})
                 synthetic = market_frame(
                     asset, frequency, days=days, symbols=[target], night=asset == "future"
                 )
@@ -83,7 +83,7 @@ def test_six_formats_independent_day_month_year_bt_and_offline_queries(data_root
                 for entry in [*published["entries"], month, year]:
                     physical = source.config.root / entry["file"]
                     assert pq.read_schema(physical).remove_metadata() == arrow_schema(schema, frequency)
-                    assert list(pq.read_table(physical).column_names) == list(market_fields(frequency))
+                    assert list(pq.read_table(physical).column_names) == list(market_fields(frequency, asset=asset))
                     cached = torrent_cache_path(source.config.root, Entry(**entry))
                     assert cached.is_file() and cached.suffix == ".btmeta"
                 originals[(schema.id, frequency)] = {"day": first, "month": month, "year": year}
@@ -139,8 +139,12 @@ def test_six_formats_independent_day_month_year_bt_and_offline_queries(data_root
                 end=days[0],
                 data_dir=daily_receiver.config.root,
             )
-            assert list(frame) == list(market_fields(scope["frequency"]))
+            assert list(frame) == list(market_fields(scope["frequency"], asset=scope["asset"]))
             assert isinstance(frame.index, pd.RangeIndex) and len(frame) == 1
+            if scope["asset"] == "future" and scope["frequency"] == "1d":
+                assert frame.settlement.iloc[0] == 10.125
+                assert frame.prev_settlement.iloc[0] == 9.625
+                assert frame.open_interest.iloc[0] == 240.0
         night = load(
             "cn/future/base",
             frequency="1m",
