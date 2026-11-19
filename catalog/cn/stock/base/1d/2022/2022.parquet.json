@@ -1,0 +1,9 @@
+{
+  "start_date": "2022-01-04",
+  "end_date": "2022-12-30",
+  "rows": 1149461,
+  "instruments": 4949,
+  "trading_days": 242,
+  "size_bytes": 38914690,
+  "magnet": "magnet:?xt=urn:btih:0cf95566b1088f4ffd04697ecc79d220fc94e46b&dn=2022.parquet"
+}

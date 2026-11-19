@@ -1,0 +1,9 @@
+{
+  "start_date": "2021-01-04",
+  "end_date": "2021-12-31",
+  "rows": 1062613,
+  "instruments": 4624,
+  "trading_days": 243,
+  "size_bytes": 35134486,
+  "magnet": "magnet:?xt=urn%3Abtih%3A2757c536992133e61a8fecf571e738abe50c0e46&dn=2021.parquet"
+}

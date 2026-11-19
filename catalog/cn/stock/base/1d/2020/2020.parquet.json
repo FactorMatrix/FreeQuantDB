@@ -1,0 +1,9 @@
+{
+  "start_date": "2020-01-02",
+  "end_date": "2020-12-31",
+  "rows": 952229,
+  "instruments": 4157,
+  "trading_days": 243,
+  "size_bytes": 30509796,
+  "magnet": "magnet:?xt=urn:btih:7e274f2ef17f42cf85f967bac225fa354f0d61be&dn=2020.parquet"
+}
