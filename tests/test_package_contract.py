@@ -63,7 +63,8 @@ def test_only_fqdb_is_shipped_and_installed(data_root):
         entry_points = next(name for name in names if name.endswith(".dist-info/entry_points.txt"))
         parser = configparser.ConfigParser()
         parser.read_string(archive.read(entry_points).decode())
-        assert dict(parser["console_scripts"]) == {"fqdb": "fqdb.cli:main"}
+        assert dict(parser["console_scripts"]) == {"fqdb": "_fqdb_cli:main"}
+        assert "_fqdb_cli.py" in names
     target = data_root / "SYNTHETIC-installed-package"
     result = subprocess.run(
         [
@@ -114,6 +115,7 @@ print(json.dumps({"package":fqdb.__name__, "version":fqdb.__version__, "origin":
     assert not (script_directory / ("fqd.exe" if os.name == "nt" else "fqd")).exists()
     if os.name != "nt":
         environment = os.environ | {"PYTHONPATH": str(target)}
+        environment.pop("FQDB_AUTOSTART", None)
         result = subprocess.run(
             [str(script_directory / "fqdb"), "--help"],
             cwd=data_root,
@@ -125,4 +127,5 @@ print(json.dumps({"package":fqdb.__name__, "version":fqdb.__version__, "origin":
         assert result.returncode == 0 and "usage: fqdb" in result.stdout
         assert "gateway" in result.stdout and "catalog" in result.stdout
         assert "serve" not in result.stdout
+        assert not (Path(environment["HOME"]) / ".fqdb").exists()
     assert importlib.util.find_spec("free_quant_db") is None

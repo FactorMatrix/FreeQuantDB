@@ -7,7 +7,7 @@ import threading
 import time
 
 from ..bt.engine import Engine
-from ..config import Config
+from ..config import Config, DataRootUnavailable
 from ..publish.publisher import Publisher
 from ..schema.base import Dataset
 from ..schema.registry import install_defaults
@@ -31,12 +31,15 @@ class Owner:
 
     def __init__(self, config: Config):
         self.config = config.ensure()
-        self.store = Store(config.root)
+        self.store = Store(config.root, check_available=self.config.check_available)
         install_defaults(self.store)
         self.lock = threading.RLock()
         self.storage_lock = threading.RLock()
         self._engine = None
         self.gateway_enabled = False
+        self.background_active = False
+        self.background_explicit = False
+        self.background_draining = False
         self.running = True
         self.closing = False
         self.last_error = None
@@ -79,21 +82,65 @@ class Owner:
         with self.lock:
             self.gateway_enabled = bool(enabled)
 
-    def activate_gateway(self):
+    def activate_gateway(self, *, persistent=False):
+        if persistent:
+            self.activate_background(explicit=True)
+            return
         with self.lock:
-            if self.closing:
-                raise FQDBError("The data worker has stopped")
-            self.seeding.start_auto()
-            self.subscriptions.activate_gateway()
+            self._activate_automatic()
+
+    def activate_background(self, *, explicit=False):
+        if type(explicit) is not bool:
+            raise FQDBError("Explicit data directory activation must be boolean")
+        with self.lock:
+            self._activate_automatic()
+            self.background_active = True
+            self.background_explicit |= explicit
+            return {"status": "active", "explicit": self.background_explicit}
+
+    def _activate_automatic(self):
+        if self.closing or getattr(self, "lifecycle_stopping", False):
+            raise FQDBError("The data worker has stopped")
+        self.background_draining = False
+        self.seeding.start_auto()
+        self.subscriptions.activate_background()
+
+    def release_implicit(self):
+        """Retire a default worker when its caller explicitly changes directories."""
+        with self.lifecycle_lock:
+            with self.lock:
+                if self.background_explicit:
+                    return {"status": "kept", "reason": "explicit_root"}
+                if self.gateway_enabled:
+                    return {"status": "kept", "reason": "active_gateway"}
+                if not self.background_active or (self.seeding.enabled and not self.seeding.automatic):
+                    return {"status": "kept", "reason": "active_work"}
+                if self.lifecycle_requests > 1 or self._active_operations():
+                    self.background_draining = True
+                    return {"status": "draining", "reason": "active_work"}
+                self.lifecycle_stopping = True
+            self.shutdown()
+        return {"status": "stopping"}
 
     def has_work(self):
         with self.lock:
+            if self.background_draining:
+                return self._active_operations()
             return (
-                self.seeding.has_work()
+                self.background_active
+                or self.seeding.has_work()
                 or self.transfers.has_work()
                 or self.jobs.has_work()
                 or self.subscriptions.has_work()
             )
+
+    def _active_operations(self):
+        return bool(
+            self.seeding.verifying_seeds
+            or (self.seeding.enabled and not self.seeding.automatic)
+            or self.transfers.has_work()
+            or self.jobs.has_work(exclude=("subscription_check",))
+        )
 
     def start(self):
         self.thread.start()
@@ -115,9 +162,17 @@ class Owner:
     def run(self):
         while self.running:
             try:
+                self.config.check_available()
                 self.seeding.refresh_candidates()
                 with self.lock:
                     self.tick()
+            except DataRootUnavailable as exc:
+                self.last_error = str(exc)
+                self.running = False
+                if handler := getattr(self, "storage_unavailable", None):
+                    handler(exc)
+                log.error("%s", exc)
+                return
             except Exception as exc:
                 self.last_error = str(exc)
                 log.exception("Service tick failed")
@@ -158,9 +213,11 @@ class Owner:
         return result
 
     def dispatch(self, action, args):
+        self.config.check_available()
         return dispatch(self, action, args)
 
     def execute_job(self, kind, args, progress):
+        self.config.check_available()
         handler = self.public_jobs.get(kind) or self.internal_jobs.get(kind)
         if handler is None:
             raise FQDBError("Unsupported job kind")
@@ -209,6 +266,9 @@ class Owner:
             provision = self.seeding.status()
             return {
                 "data_dir": str(self.config.root),
+                "background_active": self.background_active,
+                "background_explicit": self.background_explicit,
+                "background_draining": self.background_draining,
                 "provider": self.seeding.enabled,
                 "provider_parent_pid": self.seeding.parent_pid,
                 "provider_issues": self.seeding.issues,

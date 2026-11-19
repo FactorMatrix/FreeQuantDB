@@ -16,6 +16,7 @@ from fqdb.api import (
 )
 from . import catalog, jobs, peers, provider, query, sources, web
 from .query import load
+from .startup import start_on_import as _start_on_import
 
 
 def download(
@@ -73,3 +74,6 @@ __all__ = [
     "datasets",
     "tasks",
 ]
+
+_start_on_import()
+del _start_on_import

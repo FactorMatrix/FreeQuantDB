@@ -2,11 +2,14 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 import time
 
 from filelock import FileLock, Timeout
 from playwright.sync_api import expect, sync_playwright
+
+os.environ["FQDB_AUTOSTART"] = "0"
 
 from fqdb.bt.torrents import info_hash, torrent_cache_path
 from fqdb.catalog.models import Entry

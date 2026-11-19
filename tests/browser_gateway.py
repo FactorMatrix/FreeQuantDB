@@ -12,6 +12,9 @@ import time
 
 from playwright.sync_api import expect, sync_playwright
 
+# Use the explicit synthetic Gateway managed below.
+os.environ["FQDB_AUTOSTART"] = "0"
+
 from fqdb.service.client import Client
 from gateway_helpers import loopback_config
 

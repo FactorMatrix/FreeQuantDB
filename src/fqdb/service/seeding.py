@@ -42,7 +42,7 @@ class Seeding:
         self.owner, self.store, self.config, self.lock = owner, owner.store, owner.config, owner.lock
         self.enabled = False
         self.automatic = False
-        self.gateway_activated = False
+        self.auto_activated = False
         self.parent_pid = None
         self.generation = 0
         self.verifying_seeds = set()
@@ -71,7 +71,7 @@ class Seeding:
 
     def start_auto(self):
         with self.lock:
-            self.gateway_activated = True
+            self.auto_activated = True
             if self.enabled or self.state["status"] == "preparing" or not self.config.read()["auto_seed"]:
                 return
             self.enabled = self.automatic = True
@@ -96,7 +96,7 @@ class Seeding:
         self.deactivate()
         if "parent_pid" in args:
             self.config.update(provider=False)
-            if self.gateway_activated:
+            if self.auto_activated:
                 self.start_auto()
         else:
             self.config.update(provider=False, auto_seed=False)
@@ -166,7 +166,7 @@ class Seeding:
             now = time.monotonic()
             if self.owner.closing or now < self._refresh_after:
                 return
-            if not self.enabled and not (self.gateway_activated and self.owner.gateway_enabled):
+            if not self.enabled and not (self.auto_activated and self.owner.gateway_enabled):
                 return
             interval = AUTO_SEED_RESCAN_SECONDS if self.automatic else SEED_RECONCILE_SECONDS
             deadline = now + interval
@@ -185,6 +185,8 @@ class Seeding:
                 return
             self._candidates = ready
             self.issues = issues
+            if self.enabled and self.owner._engine is None:
+                self._restore_pending = bool(ready)
             self._refresh_after = time.monotonic() + interval
             self._reconcile_after = 0
 
@@ -271,7 +273,7 @@ class Seeding:
             else:
                 status, message = "no_data", "暂无可做种数据。"
             result.update(status=status, message=message, eligible=eligible, issues=self.issues)
-        elif self.gateway_activated and result["status"] == "stopped":
+        elif self.auto_activated and result["status"] == "stopped":
             result.update(eligible=len(candidates) if candidates is not None else None, issues=self.issues)
         return result
 

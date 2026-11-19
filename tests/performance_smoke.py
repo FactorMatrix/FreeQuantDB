@@ -3,11 +3,14 @@
 import argparse
 from datetime import date, timedelta
 import json
+import os
 import platform
 import resource
 import time
 
 import libtorrent as lt
+
+os.environ["FQDB_AUTOSTART"] = "0"
 
 from fqdb.config import Config
 from test_contracts import sample_frame, sample_schema

@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-from .config import Config, select_root
+from .config import Config
 from .service.client import Client
 from .service.subscriptions import DEFAULT_INTERVAL
+from .startup import autostart_enabled, select_client
 from .storage.metadata import Store
 from .storage.query import get_price as query_price
 
 
 def init(data_dir=None):
-    config = Config(data_dir).ensure()
-    select_root(config.root)
-    return {"data_dir": str(config.root), "provider": config.read()["provider"], "layout": config.layout}
+    connection, outgoing = select_client(data_dir, persist=True, activate=autostart_enabled())
+    config = connection.config
+    result = {"data_dir": str(config.root), "provider": config.read()["provider"], "layout": config.layout}
+    if outgoing:
+        result["previous_backgrounds"] = outgoing
+    return result
 
 
 def client():
@@ -54,14 +58,16 @@ def update(source=None):
 
 
 def get_price(instruments=None, start_date=None, end_date=None, **options):
-    # Opening SQLite and Parquet does not start any network service.
-    return query_price(
-        Store(Config().ensure().root),
-        instruments=instruments,
-        start_date=start_date,
-        end_date=end_date,
-        **options,
-    )
+    # Query local SQLite and Parquet independently of the background service.
+    config = Config().ensure()
+    with config.pin():
+        return query_price(
+            Store(config.root, check_available=config.check_available),
+            instruments=instruments,
+            start_date=start_date,
+            end_date=end_date,
+            **options,
+        )
 
 
 class Report(dict):
@@ -89,7 +95,7 @@ def add_source(source):
 
 
 def subscribe(dataset=None, frequency=None, *, interval=DEFAULT_INTERVAL, download=False, **options):
-    """Save a catalog check or opt into downloading packages after Gateway starts."""
+    """Save a catalog check or opt into downloads in the shared background."""
     return client().call(
         "subscribe",
         {

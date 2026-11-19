@@ -16,19 +16,21 @@ python -m pip install git+https://github.com/FactorMatrix/FreeQuantDB.git
 python -m fqdb gateway
 ```
 
-首次运行会初始化数据目录并启动传输后台。Gateway 会恢复有原始种子信息的本地数据包，并立即检查已保存的订阅。后续默认每 3 小时检查磁力目录，也可自定义检查时间。
+`fqdb gateway` 打开管理网页。业务命令和 Python 的 `import fqdb` 也会启动或连接同一个传输后台。Python 导入时不打开网页。后台恢复本地可用数据的做种并检查已保存的订阅，之后默认每 3 小时检查磁力目录。
 
 在「传输 → 传输设置」选择数据集和频率后，可开启自动下载。仅更新磁力目录时可以留空。下载完成后会用原磁力继续做种。这里也可以暂停共享、设置下载和上传上限、添加优先 IP。
 
-关闭网页或终端后，后台会继续处理订阅、下载和共享。运行 `python -m fqdb service stop` 结束后台。电脑重启后，手动运行 Gateway 即可恢复。
+关闭网页、终端或 Python 脚本后，后台会继续处理订阅、下载和共享。运行 `fqdb service stop` 结束后台。下次使用业务命令或在新 Python 进程中导入 `fqdb` 时会再次启动。首次使用的总上传上限为 **500 KB/s（500,000 B/s）**。在页面中暂停共享或修改限速后，设置会保留。
 
-默认数据目录是用户目录下的 `~/.fqdb`；现有环境变量和已保存的目录设置继续生效。Python 包安装在当前 Python 环境中。
+## 数据目录
 
-可选：本次使用其他数据目录。
+CLI 的 `--data-dir` 或 `-d` 会保存所选目录，之后 CLI 和 Python 共用该选择。未保存目录时默认使用 `~/.fqdb`。
 
 ```bash
-python -m fqdb gateway -d ~/fqdb_data
+fqdb gateway -d ~/fqdb_data
 ```
+
+如果从 Python 首次使用自定义目录，可以在导入前为进程设置 `FQDB_DATA_DIR`，也可以调用 `fqdb.init(data_dir)` 切换并保存目录。切换时，明确使用旧目录的后台会保留，正在处理的任务可继续完成，CLI 和 Python 会提示旧后台的状态。已登记的数据目录或挂载不可用时，恢复原挂载后再使用，或显式选择其他目录。
 
 ## 帮助
 
@@ -39,17 +41,13 @@ python -m fqdb gateway -h
 
 其他命令同样支持 `-h` 或 `--help`。
 
-## Python 直接做种
-
-本地已有可提供的数据时，无需先打开网页：
+## Python
 
 ```python
 import fqdb
-
-fqdb.provider.run()
 ```
 
-前台运行，按 `Ctrl+C` 停止；普通 `import fqdb` 不会启动服务。命令行也可直接运行 `python -m fqdb provider run`。
+可以用 `fqdb.provider.start()` 显式开启共享，或用 `fqdb.provider.stop()` 暂停。只需离线读取时，在导入前设置 `FQDB_AUTOSTART=0`。
 
 ## 文档与许可
 

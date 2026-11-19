@@ -24,7 +24,10 @@ dependencies = ["libtorrent>=2.0.11,<3", "pyarrow>=18,<27", "pandas>=2.2,<4", "f
 dev = ["pytest>=8,<10", "build>=1.2,<2", "ruff>=0.9,<1", "playwright>=1.49,<2"]
 
 [project.scripts]
-fqdb = "fqdb.cli:main"
+fqdb = "_fqdb_cli:main"
+
+[tool.setuptools]
+py-modules = ["_fqdb_cli"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -48,7 +48,8 @@ def installed_package():
     )
     entry_points = {p.name: p.value for p in distribution.entry_points if p.group == "console_scripts"}
     require(
-        entry_points == {"fqdb": "fqdb.cli:main"}, "Distribution must expose exactly the fqdb console command"
+        entry_points == {"fqdb": "_fqdb_cli:main"},
+        "Distribution must expose exactly the fqdb console command",
     )
     require(importlib.util.find_spec("free_quant_db") is None, "Removed package is still importable")
     package_root = Path(distribution.locate_file("")).resolve()
@@ -117,6 +118,8 @@ def exercise(root, report):
     fqdb.init(root)
     client = Client(root)
     client.config.update(listen="127.0.0.1:0", discovery=False)
+    automatic_environment = os.environ.copy()
+    automatic_environment.pop("FQDB_AUTOSTART", None)
     gateway = None
     gateway_log = root / "SYNTHETIC-gateway.log"
     try:
@@ -140,11 +143,34 @@ def exercise(root, report):
         require(queried.shape == (4, 2), "Installed query returned an unexpected frame")
         require(queried.attrs["synthetic"], "Query lost explicit synthetic provenance")
         require(client.endpoint() is None, "Finite SDK operations started a background service")
+        help_command = subprocess.run(
+            [str(command), "--help"],
+            env=automatic_environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=True,
+        )
+        require(
+            "gateway" in help_command.stdout and client.endpoint() is None, "CLI help activated the service"
+        )
+        starter = subprocess.run(
+            [sys.executable, "-c", "import fqdb"],
+            env=automatic_environment,
+            capture_output=True,
+            text=True,
+            timeout=25,
+            check=True,
+        )
+        require(not starter.stdout and not starter.stderr, "Python import printed service output")
+        imported_owner = client.endpoint()
+        require(imported_owner is not None, "Ordinary Python import did not start the background")
         with gateway_log.open("w") as log:
             gateway = subprocess.Popen(
                 [sys.executable, "-m", "fqdb", "gateway", "--no-browser", "-d", str(root)],
                 stdout=log,
                 stderr=subprocess.STDOUT,
+                env=automatic_environment,
             )
         deadline = time.monotonic() + 30
         endpoint = None
@@ -158,6 +184,7 @@ def exercise(root, report):
             else:
                 raise RuntimeError("Installed gateway did not become ready")
         before_pid = endpoint["pid"]
+        require(imported_owner["pid"] == before_pid, "Gateway replaced the worker started by Python import")
         cli = subprocess.run(
             [str(command), "-d", str(root), "status"],
             capture_output=True,
@@ -212,10 +239,19 @@ def exercise(root, report):
         require(not paused["provider"] and not paused["settings"]["auto_seed"], "Pause was not saved")
         require(not paused["transfers"], "Pause left native seeds running")
         report["checks"]["seed_worker_survived_gateway"] = True
+        report["checks"]["normal_import_and_console_share_worker"] = True
+        subprocess.run(
+            [str(command), "service", "stop"],
+            env=automatic_environment,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=True,
+        )
         deadline = time.monotonic() + 20
         while client.endpoint() and time.monotonic() < deadline:
             time.sleep(0.1)
-        require(client.endpoint() is None, "Gateway left an idle worker")
+        require(client.endpoint() is None, "CLI stop did not shut down the worker")
     finally:
         if client.endpoint():
             client.call("shutdown")
@@ -252,6 +288,8 @@ def main():
     )
     root.mkdir(parents=True, exist_ok=True)
     os.environ["FQDB_USER_CONFIG"] = str(root / ".install-check-user.json")
+    os.environ["FQDB_DATA_DIR"] = str(root)
+    os.environ["FQDB_AUTOSTART"] = "0"
     report = {"status": "running", "synthetic": True, "data_root": str(root)}
     destination = (
         Path(args.report).expanduser().resolve() if args.report else root / "SYNTHETIC-install-result.json"

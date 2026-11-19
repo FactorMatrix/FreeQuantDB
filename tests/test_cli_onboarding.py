@@ -55,6 +55,7 @@ def test_first_command_automatically_initializes_the_default_home(data_root):
 
 def test_every_command_help_exposes_directory_options_without_initializing(data_root):
     environment = isolated_environment(data_root)
+    environment.pop("FQDB_AUTOSTART", None)
     selection = Path(environment["FQDB_USER_CONFIG"])
     selection.write_text("{invalid SYNTHETIC user config")
     unused = data_root / "SYNTHETIC must not be created"
@@ -89,7 +90,7 @@ def test_every_command_help_exposes_directory_options_without_initializing(data_
             assert result.returncode == 0, (arguments, result.stdout, result.stderr)
             assert re.search(r"(?m)^[ \t]+-d(?=[ ,\t])", result.stdout)
             assert "--data-dir DIRECTORY" in result.stdout
-            assert "init saves" in result.stdout
+            assert "Use and save this data root" in result.stdout
         if command is not None:
             result = run_cli(data_root, environment, command, "-d", unused, "-h")
             assert result.returncode == 0, result.stdout + result.stderr
@@ -99,7 +100,7 @@ def test_every_command_help_exposes_directory_options_without_initializing(data_
     assert selection.read_text() == "{invalid SYNTHETIC user config"
 
 
-def test_directory_aliases_and_placements_are_temporary_and_accept_real_paths(data_root):
+def test_directory_aliases_and_placements_save_the_selected_path(data_root):
     environment = isolated_environment(data_root)
     saved = data_root / "SYNTHETIC saved data"
     success(data_root, environment, "init", "-d", saved)
@@ -119,8 +120,8 @@ def test_directory_aliases_and_placements_are_temporary_and_accept_real_paths(da
                 assert result["data_dir"] == str(expected.resolve())
                 assert not (expected / ".fqdb").exists()
                 assert result["service_running"] is False
-                assert success(data_root, environment, "status")["data_dir"] == str(saved)
-    assert json.loads(Path(environment["FQDB_USER_CONFIG"]).read_text())["data_dir"] == str(saved)
+                assert success(data_root, environment, "status")["data_dir"] == str(expected.resolve())
+    assert json.loads(Path(environment["FQDB_USER_CONFIG"]).read_text())["data_dir"] == str(expected.resolve())
 
 
 def test_init_saves_both_aliases_and_environment_keeps_priority(data_root):
@@ -168,11 +169,11 @@ def test_cli_background_seeding_enforces_the_default_limit_with_ip_priority(data
         assert started["provider"] and started["provider_parent_pid"] is None
         status = success(data_root, environment, *cli, "status")
         assert status["service_running"] and status["provider"]
-        assert status["settings"]["upload_limit"] == status["priority"]["global_upload_limit"] == 1_000_000
+        assert status["settings"]["upload_limit"] == status["priority"]["global_upload_limit"] == 500_000
 
         target = "192.0.2.10"
         priority = success(data_root, environment, *cli, "priority", "set", target)
-        assert priority["global_upload_limit"] == 1_000_000
+        assert priority["global_upload_limit"] == 500_000
         assert [(rule["ip"], rule["level"]) for rule in priority["rules"]] == [(target, "high")]
         assert success(data_root, environment, *cli, "priority", "list")["rules"][0]["ip"] == target
         assert not success(data_root, environment, *cli, "stop")["provider"]

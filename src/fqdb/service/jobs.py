@@ -15,7 +15,7 @@ class Jobs:
         self.store, self.execute = store, execute
         self.pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="fqdb-job")
         self.guard = threading.Lock()
-        self.active = set()
+        self.active = {}
         self.authorized = set()
         self.closed = False
         with store.db() as c:
@@ -23,14 +23,14 @@ class Jobs:
                 id TEXT PRIMARY KEY,kind TEXT,args TEXT,status TEXT,progress REAL,
                 detail TEXT,result TEXT,error TEXT,created_at TEXT,updated_at TEXT)""")
 
-    def has_work(self):
+    def has_work(self, *, exclude=()):
         with self.guard:
-            if self.active:
+            if any(kind not in exclude for kind in self.active.values()):
                 return True
             with self.store.db() as c:
                 return any(
-                    r[0] in self.authorized
-                    for r in c.execute("SELECT id FROM service_jobs WHERE status IN ('queued','running')")
+                    r["id"] in self.authorized and r["kind"] not in exclude
+                    for r in c.execute("SELECT id,kind FROM service_jobs WHERE status IN ('queued','running')")
                 )
 
     def submit(self, kind, args):
@@ -53,12 +53,12 @@ class Jobs:
                 return
             with self.store.db() as c:
                 rows = c.execute(
-                    "SELECT id FROM service_jobs WHERE status='queued' ORDER BY created_at"
+                    "SELECT id,kind FROM service_jobs WHERE status='queued' ORDER BY created_at"
                 ).fetchall()
             for row in rows:
                 identity = row[0]
                 if identity in self.authorized and identity not in self.active and len(self.active) < 2:
-                    self.active.add(identity)
+                    self.active[identity] = row["kind"]
                     self.pool.submit(self._run, identity)
 
     def _run(self, identity):
@@ -83,7 +83,7 @@ class Jobs:
             self.set(identity, status="failed", error=str(exc))
         finally:
             with self.guard:
-                self.active.discard(identity)
+                self.active.pop(identity, None)
 
     def get(self, identity):
         with self.store.db() as c:

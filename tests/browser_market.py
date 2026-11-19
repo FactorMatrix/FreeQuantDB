@@ -6,11 +6,14 @@ script creates synthetic descriptors and one synthetic local Parquet file.
 
 import argparse
 from datetime import date
+import os
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 from playwright.sync_api import expect, sync_playwright
+
+os.environ["FQDB_AUTOSTART"] = "0"
 
 from fqdb.catalog.magnet_manifest import SCHEMA_VERSION, dataset_path, package_path
 from fqdb.demo import market_frame, market_schema

@@ -6,11 +6,14 @@ No real source request, public announce or remote publication.
 
 import argparse
 import json
+import os
 import shlex
 from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+os.environ["FQDB_AUTOSTART"] = "0"
 
 from fqdb.demo import market_frame, market_schema
 from fqdb.layout import runtime_path

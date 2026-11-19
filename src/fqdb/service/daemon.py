@@ -1,4 +1,4 @@
-"""Detached worker for Gateway leases, transfers and local seeding."""
+"""Detached worker for Gateway leases, subscriptions, transfers and sharing."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ import time
 from filelock import FileLock, Timeout
 import uvicorn
 
-from ..config import Config
+from ..config import Config, DataRootUnavailable
 from ..layout import runtime_path
 from ..util import atomic_json
 from ..web.app import create_app
@@ -50,7 +50,20 @@ def process_alive(pid):
 
 def serve(root=None, port=0):
     config = Config(root).ensure()
+    with config.pin():
+        _serve(config, port)
+
+
+def _serve(config, port):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+
+    def storage_unavailable(error):
+        # A detached/replaced mount invalidates every absolute runtime path.
+        # Skip ordinary shutdown, which persists resume data to that path.
+        logging.error("%s", error)
+        os._exit(1)
+
+    config.check_available()
     lock = FileLock(runtime_path(config.root, "state") / "service.lock")
     try:
         lock.acquire(timeout=0)
@@ -61,6 +74,7 @@ def serve(root=None, port=0):
     endpoint_path = runtime_path(config.root, "state") / "service.json"
     try:
         owner = Owner(config)
+        owner.storage_unavailable = storage_unavailable
         owner.lifetime = Lifetime(owner)
         owner.lifecycle_requests = 0
         owner.lifecycle_lock = threading.RLock()
@@ -84,6 +98,7 @@ def serve(root=None, port=0):
         sock.bind(("127.0.0.1", port))
         sock.listen(128)
         url = f"http://127.0.0.1:{sock.getsockname()[1]}"
+        config.check_available()
         atomic_json(endpoint_path, {"url": url, "token": token, "pid": os.getpid()})
         endpoint_path.chmod(0o600)
 
@@ -100,6 +115,7 @@ def serve(root=None, port=0):
             startup_until = idle_since + STARTUP_SECONDS
             while not stop_monitor.wait(0.2):
                 try:
+                    config.check_available()
                     with owner.lock:
                         parent_pid = owner.seeding.parent_pid
                         if parent_pid is not None and not process_alive(parent_pid):
@@ -122,6 +138,8 @@ def serve(root=None, port=0):
                             owner.lifecycle_stopping = True
                             owner.shutdown()
                             return
+                except DataRootUnavailable as exc:
+                    storage_unavailable(exc)
                 except Exception:
                     logging.exception("Worker lifecycle check failed")
                     owner.shutdown()
@@ -136,11 +154,18 @@ def serve(root=None, port=0):
         if monitor:
             monitor.join(timeout=2)
         try:
+            config.check_available()
             if owner:
                 owner.close()
+        except DataRootUnavailable as exc:
+            storage_unavailable(exc)
         finally:
             if sock:
                 sock.close()
+            try:
+                config.check_available()
+            except DataRootUnavailable as exc:
+                storage_unavailable(exc)
             endpoint_path.unlink(missing_ok=True)
             lock.release()
 

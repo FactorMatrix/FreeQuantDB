@@ -105,7 +105,8 @@ def test_passive_read_retries_idle_shutdown_rejection(monkeypatch):
     assert len(attempts) == 2
 
 
-def test_gateway_open_returns_the_endpoint_that_accepted_its_lease(monkeypatch):
+@pytest.mark.parametrize("persistent", [False, True])
+def test_gateway_open_returns_the_endpoint_that_accepted_its_lease(monkeypatch, persistent):
     attempts = []
     worker = object.__new__(Client)
     old = {"url": "http://127.0.0.1:12345", "token": "SYNTHETIC-replaced-worker"}
@@ -119,7 +120,7 @@ def test_gateway_open_returns_the_endpoint_that_accepted_its_lease(monkeypatch):
 
     def post(endpoint, action, args, timeout):
         attempts.append(endpoint)
-        assert action == "gateway_open" and args == {} and timeout == 120
+        assert action == "gateway_open" and args == {"persistent": persistent} and timeout == 120
         if endpoint == old:
             raise httpx.ConnectError("worker closed its listener")
         return {"session_id": "SYNTHETIC-lease"}
@@ -127,6 +128,6 @@ def test_gateway_open_returns_the_endpoint_that_accepted_its_lease(monkeypatch):
     monkeypatch.setattr(worker, "ensure", ensure)
     monkeypatch.setattr(worker, "_post", post)
     monkeypatch.setattr("fqdb.service.client.time.sleep", lambda _: None)
-    assert worker.open_gateway(port=12345) == (new, {"session_id": "SYNTHETIC-lease"})
+    assert worker.open_gateway(port=12345, persistent=persistent) == (new, {"session_id": "SYNTHETIC-lease"})
     assert attempts == [old, new]
     assert ports == [12345, 12345]

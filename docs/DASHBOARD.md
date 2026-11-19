@@ -11,19 +11,19 @@
 
 字段、目录、状态和所有按钮均连接当前真实后台，无数据时保持空状态。格式和使用说明见 [行情说明](MARKET_DATA.md)。
 
-运行 `fqdb gateway` 会启动或连接当前数据目录的 BT 后台，并恢复有原始种子信息的本地数据包。下载时通过 BT 分享已下载的分块，完成后沿用同一个 info-hash 做种。关闭网页或按 `Ctrl+C` 退出 Gateway 后，后台继续处理下载、共享和启用的订阅。网页上的暂停选择会保留到下次启动，运行 `fqdb service stop` 可以停止整个后台。重启电脑后，需要手动运行 Gateway。
+`fqdb gateway`、正常业务命令和普通 `import fqdb` 都会启动或连接当前数据目录的 BT 后台。只有 Gateway 打开网页。下载时通过 BT 分享已下载的分块，完成后沿用同一个 info-hash 做种。关闭网页、终端或脚本后，后台继续处理下载、共享和启用的订阅。运行 `fqdb service stop` 停止整个后台。重启电脑后，在使用 CLI 或重新导入包时启动。
 
-普通 `import fqdb` 和帮助命令不会启动后台。Python 也可调用 `fqdb.provider.run()` 前台做种，用 `start()` 显式开启后台做种，或用 `stop()` 暂停做种。
+帮助、状态和停止命令可以在后台关闭时使用。网页或 `fqdb.provider.stop()` 保存的共享暂停设置会保留。需要显式恢复时，可在网页开启共享或调用 `fqdb.provider.start()`。
 
 ## 自动更新与订阅
 
-Gateway 启动时会先检查已保存的订阅，后续默认每 3 小时检查一次。可以调整间隔，或指定每天的时间和时区。留空数据集时，订阅仅更新磁力目录。
+后台启动时会先检查已保存的订阅，后续默认每 3 小时检查一次。可以调整间隔，或指定每天的时间和时区。留空数据集时，订阅仅更新磁力目录。
 
 勾选自动下载后，选择要同步的数据集和频率。填写日期可补齐指定范围，留空日期则跟进新发布和新版本。首次拿到该范围的目录时只取最新覆盖。已下载或已覆盖的数据会跳过，手动暂停、取消的任务仍由用户控制。
 
 传输设置显示上次检查结果和下次检查时间。目录源暂时不可用时，可以查看错误，本地已有的数据仍可继续共享。
 
-也可用 CLI 或 Python 保存订阅，随后运行 `fqdb gateway` 生效。
+也可用 CLI 或 Python 保存订阅。
 
 ```bash
 fqdb subscribe cn/stock/base --frequency 1d --download
@@ -43,7 +43,7 @@ fqdb -d /path/to/fqdb-data provider status
 fqdb -d /path/to/fqdb-data provider stop
 ```
 
-默认总上传上限为 1 MB/s（1,000,000 B/s），已有设置继续使用。网页使用 MB/s，`0` 表示不限速。`provider start --upload-limit` 使用 B/s。
+新安装默认总上传上限为 500 KB/s（500,000 B/s）。已保存的限速继续使用。网页使用 MB/s，500 KB/s 显示为 0.5 MB/s。`provider start --upload-limit` 使用 B/s。`0` 表示不限速。
 
 新安装默认启用 DHT、PEX 等节点发现，并在本机 IPv4 网络接口上监听 BT。已有监听地址和发现设置继续生效，管理网页默认只监听 `127.0.0.1`。公网可达性取决于 NAT、端口和对端在线情况。局域网也可通过 `fqdb peers add NODE_IP NODE_PORT` 添加已知节点。
 

@@ -1,4 +1,4 @@
-"""Schedule catalog checks and scoped downloads in the active Gateway worker."""
+"""Schedule catalog checks and scoped downloads in the shared worker."""
 
 from datetime import datetime, time as dt_time, timedelta, timezone
 import json
@@ -37,15 +37,15 @@ def next_run(body, timestamp=None):
 class Subscriptions:
     def __init__(self, owner):
         self.owner, self.store, self.jobs = owner, owner.store, owner.jobs
-        self.gateway_active = False
+        self.background_active = False
         self.initial_checks = set()
         self.resume_pending = set()
         self.wake_at = 0
         self.last_schedule = 0
 
-    def activate_gateway(self):
-        if not self.gateway_active:
-            self.gateway_active = True
+    def activate_background(self):
+        if not self.background_active:
+            self.background_active = True
             self.initial_checks = {
                 row["id"] for row in self.store.subscriptions() if row["body"].get("enabled", True)
             }
@@ -54,7 +54,7 @@ class Subscriptions:
             self.last_schedule = 0
 
     def has_work(self):
-        return self.gateway_active and self.wake_at is not None
+        return self.background_active and self.wake_at is not None
 
     def _wake(self):
         self.wake_at = 0
@@ -124,10 +124,10 @@ class Subscriptions:
         if same_scope:
             body.update({key: last[key] for key in _RESULT_FIELDS if key in last})
         body["generation"] = uuid.uuid4().hex
-        due = time.time() if self.gateway_active and body["enabled"] else next_run(body)
+        due = time.time() if self.background_active and body["enabled"] else next_run(body)
         self.store.subscribe(body, next_run=due, reset_selection=not same_scope)
         self._cancel_unused(last.get("running_job"))
-        if self.gateway_active and body["enabled"]:
+        if self.background_active and body["enabled"]:
             self.resume_pending.add(identity)
         self._wake()
         return {"id": identity, "download": body["download"], "next_run": due}
@@ -158,8 +158,10 @@ class Subscriptions:
             return
         self.last_schedule = time.monotonic()
         self.jobs.tick()
+        if self.owner.background_draining:
+            return
         timestamp = time.time()
-        if not (self.gateway_active or manual_provider) or self.wake_at is None or self.wake_at > timestamp:
+        if not (self.background_active or manual_provider) or self.wake_at is None or self.wake_at > timestamp:
             return
         next_wake = float("inf")
         due_by_source = {}
@@ -193,7 +195,7 @@ class Subscriptions:
                 {
                     "source": source,
                     "checks": {identity: body.get("generation") for identity, body in checks.items()},
-                    "download": self.gateway_active,
+                    "download": self.background_active,
                 },
             )
             for identity, body in checks.items():
@@ -204,7 +206,7 @@ class Subscriptions:
         self.wake_at = None if next_wake == float("inf") else next_wake
 
     def _current(self, identity, generation):
-        if self.owner.closing or getattr(self.owner, "lifecycle_stopping", False):
+        if self.owner.closing or self.owner.background_draining or getattr(self.owner, "lifecycle_stopping", False):
             return None
         row = self.store.subscription(identity)
         if row:

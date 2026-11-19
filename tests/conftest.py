@@ -4,6 +4,10 @@ import tempfile
 
 import pytest
 
+# Keep test collection and existing explicit lifecycle fixtures passive. The
+# default startup tests opt back in inside subprocesses with isolated homes.
+os.environ["FQDB_AUTOSTART"] = "0"
+
 from gateway_helpers import loopback_config
 
 ROOT = (

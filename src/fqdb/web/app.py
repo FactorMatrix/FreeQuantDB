@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..config import DataRootUnavailable
 from ..layout import runtime_path
 from ..service.lifetime import Lifetime
 from ..storage.query import get_price
@@ -45,6 +46,10 @@ def create_app(owner, token):
             ) or request.cookies.get("fqdb", "")
             if not secrets.compare_digest(supplied, token):
                 return JSONResponse({"error": "Service token required"}, 401)
+        try:
+            owner.config.check_available()
+        except DataRootUnavailable as exc:
+            return JSONResponse({"error": str(exc), "type": type(exc).__name__}, 503)
         if request.url.path == "/" or request.url.path.startswith(
             ("/static/", "/api/console/", "/api/query")
         ):
@@ -135,7 +140,9 @@ def create_app(owner, token):
             return {"status": "stopping"}
         try:
             if action == "gateway_open":
-                return owner.lifetime.open()
+                return owner.lifetime.open(persistent=args.get("persistent", False))
+            if action == "background_release":
+                return owner.release_implicit()
             if action == "gateway_heartbeat":
                 return owner.lifetime.heartbeat(args["session_id"], bool(args.get("browser", False)))
             if action == "gateway_close":

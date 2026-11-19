@@ -54,8 +54,10 @@ def subscription(client):
 
 
 def share_ready(client, *identities):
-    transfers = client.get("/api/status")["transfers"]
-    return set(identities) <= {item["id"] for item in transfers if item["seeding"]}
+    status = client.get("/api/status")
+    unfinished = {task["id"] for task in status["tasks"] if task["status"] != "complete"}
+    seeding = {item["id"] for item in status["transfers"] if item["seeding"]}
+    return set(identities) <= seeding - unfinished
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Closing the CLI terminal uses POSIX SIGINT")
@@ -99,7 +101,7 @@ def test_autosync_waits_without_gateway_and_seeds_original_and_revised_packages(
         export_public_catalog(publisher, catalog)
         wait_for(lambda: share_ready(receiver, requested.info_hash), timeout=28)
         assert receiver.endpoint()["pid"] == endpoint["pid"]
-        assert subscription(receiver)["body"]["last_check"] > first
+        wait_for(lambda: subscription(receiver)["body"]["last_check"] > first)
         installed = Store(receiver.config.root)
         assert [task["id"] for task in installed.tasks()] == [requested.info_hash]
         assert installed.task(requested.info_hash)["body"]["entry"]["magnet"] == requested.magnet

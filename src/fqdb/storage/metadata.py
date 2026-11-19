@@ -25,9 +25,12 @@ _REVISION_ORDER = "ABS(version),version DESC"
 
 
 class Store:
-    def __init__(self, root):
+    def __init__(self, root, *, check_available=None):
         self.root = root
+        self._check_available = check_available
         self.path = runtime_path(root, "state") / "index.sqlite3"
+        if self._check_available is not None:
+            self._check_available()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.db() as c:
             c.executescript("""
@@ -86,6 +89,8 @@ class Store:
 
     @contextmanager
     def db(self):
+        if self._check_available is not None:
+            self._check_available()
         c = sqlite3.connect(self.path, timeout=30)
         c.row_factory = sqlite3.Row
         try:

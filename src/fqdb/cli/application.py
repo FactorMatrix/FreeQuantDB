@@ -6,8 +6,7 @@ import argparse
 import json
 import sys
 
-from ..config import select_root
-from ..service.client import Client
+from ..startup import autostart_enabled, select_client
 from . import catalogs, local, sharing, transfers
 
 
@@ -16,7 +15,7 @@ def _data_dir_argument(parser):
         "-d",
         "--data-dir",
         metavar="DIRECTORY",
-        help="Use this data root for this command; init saves the choice (otherwise configured root or ~/.fqdb)",
+        help="Use and save this data root (otherwise configured root or ~/.fqdb)",
     )
 
 
@@ -45,16 +44,31 @@ class CommandLine:
         root, rest = self.root_options.parse_known_args(argv)
         args = vars(self.parser.parse_args(rest))
         handler = args.pop("handler")
-        args.pop("command")
+        command = args.pop("command")
         args.pop("data_dir")
         try:
-            client = Client(root.data_dir)
-            select_root(client.config.root, persist=False)
+            automatic = autostart_enabled()
+            explicit_service = command == "gateway" or (
+                command == "provider" and args["operation"] in {"start", "run"}
+            )
+            client, _ = select_client(
+                root.data_dir,
+                persist=root.data_dir is not None or command == "init",
+                activate=automatic and _activates_background(command, args),
+                opens_service=automatic and explicit_service,
+            )
             result = handler(client, args)
             if result is not None:
                 print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
         except Exception as exc:
             self.parser.exit(1, f"{self.parser.prog}: {exc}\n")
+
+
+def _activates_background(command, args):
+    operation = args.get("operation")
+    if command in {"gateway", "service", "status", "logs", "jobs", "provider", "settings"}:
+        return False
+    return command != "task" or operation in {"retry", "resume"}
 
 
 def main(argv=None):

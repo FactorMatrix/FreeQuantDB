@@ -5,7 +5,7 @@ from fqdb.config import Config
 from test_contracts import setup_store
 
 
-def test_offline_query_does_not_create_service(data_root):
+def test_opted_out_offline_query_does_not_create_service(data_root):
     setup_store(data_root)
     assert not (data_root / ".state/state/service.json").exists()
     script = """

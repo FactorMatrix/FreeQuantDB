@@ -1,4 +1,4 @@
-"""Local operations stay in process; explicitly activated work owns a worker."""
+"""Connect CLI and Python calls to the worker which owns their data directory."""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ class Client:
         self.config = Config(root).ensure()
 
     def endpoint(self):
+        self.config.check_available()
         path = runtime_path(self.config.root, "state") / "service.json"
         if not path.exists():
             return None
@@ -103,6 +104,7 @@ class Client:
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=log,
+                    env=os.environ | {"FQDB_AUTOSTART": "0"},
                     **options,
                 )
             while time.monotonic() < deadline and process.poll() is None:
@@ -170,10 +172,35 @@ class Client:
     def call(self, action, args=None, timeout=120):
         return self._retry_unaccepted(lambda: self._call_once(action, args, timeout))
 
-    def open_gateway(self, port=0):
+    def activate(self, *, explicit=False):
+        """Start or reuse this root's sharing and subscription worker without a webpage."""
+        def activate_owner():
+            endpoint = self.ensure()
+            self._post(endpoint, "background_activate", {"explicit": explicit}, timeout=30)
+            return endpoint
+
+        return self._retry_unaccepted(activate_owner)
+
+    def release_implicit(self):
+        """Retire an implicit worker after current operations, preserving explicit ownership."""
+        endpoint = self.endpoint()
+        if endpoint is not None:
+            try:
+                result = self._post(endpoint, "background_release", {}, timeout=30)
+            except (httpx.ConnectError, _WorkerStopping):
+                pass
+            else:
+                if result["status"] in {"kept", "draining"}:
+                    return result
+        self.config.check_available()
+        ownership = FileLock(runtime_path(self.config.root, "state") / "service.lock", timeout=45)
+        with ownership:
+            return {"status": "stopped"}
+
+    def open_gateway(self, port=0, *, persistent=False):
         def open_session():
             endpoint = self.ensure(port=port)
-            return endpoint, self._post(endpoint, "gateway_open", {}, timeout=120)
+            return endpoint, self._post(endpoint, "gateway_open", {"persistent": persistent}, timeout=120)
 
         return self._retry_unaccepted(open_session)
 

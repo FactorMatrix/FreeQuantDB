@@ -4,11 +4,16 @@ from functools import partial
 import json
 from pathlib import Path
 
-from .. import api
-
 
 def _init(client, _):
-    return api.init(client.config.root) | {"settings": client.config.read()}
+    config = client.config
+    settings = config.read()
+    return {
+        "data_dir": str(config.root),
+        "provider": settings["provider"],
+        "layout": config.layout,
+        "settings": settings,
+    }
 
 
 def _gateway(_, args):

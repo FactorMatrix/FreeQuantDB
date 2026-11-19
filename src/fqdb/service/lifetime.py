@@ -29,9 +29,11 @@ class Lifetime:
         with self.lock:
             return self._expire()
 
-    def open(self):
+    def open(self, *, persistent=False):
+        if type(persistent) is not bool:
+            raise FQDBError("Persistent Gateway activation must be boolean")
         with self.lock:
-            self.owner.activate_gateway()
+            self.owner.activate_gateway(persistent=persistent)
             session_id = secrets.token_urlsafe(24)
             self.sessions[session_id] = {
                 "deadline": time.monotonic() + self.ttl,

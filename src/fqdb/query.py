@@ -13,7 +13,8 @@ from fqdb.util import FQDBError, atomic_json, day
 
 
 def _store(data_dir=None):
-    return Store(Config(data_dir).ensure().root)
+    config = Config(data_dir).ensure()
+    return Store(config.root, check_available=config.check_available)
 
 
 def register_alias(name, dataset, frequency, *, data_dir=None):

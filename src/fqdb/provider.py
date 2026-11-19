@@ -1,6 +1,7 @@
 """User-controlled data provision and actual native upload scheduling rules."""
 
 from .layout import runtime_path
+from .startup import autostart_enabled
 
 from fqdb import api
 
@@ -16,11 +17,15 @@ def start(datasets=None, upload_limit=None, **scope):
         args["datasets"] = datasets
     if upload_limit is not None:
         args["upload_limit"] = upload_limit
-    return api.client().call("provider_start", args)
+    client = api.client()
+    result = client.call("provider_start", args)
+    if autostart_enabled():
+        client.activate(explicit=True)
+    return result
 
 
 def run(datasets=None, upload_limit=None, *, data_dir=None, **scope):
-    """Run local sharing in the foreground; Ctrl+C or script exit stops it.
+    """Run a scoped foreground sharing session until Ctrl+C or script exit.
 
     No eligible local data returns promptly with a truthful preparation result.
     data_dir uses init() and saves that directory as the Python/CLI selection.
@@ -54,7 +59,7 @@ def run(datasets=None, upload_limit=None, *, data_dir=None, **scope):
 
 
 def stop():
-    """Pause sharing and keep it paused on the next Gateway start."""
+    """Pause sharing and keep it paused across background activations."""
     client = api.client()
     from filelock import FileLock, Timeout
     import time

@@ -20,6 +20,7 @@ class Action:
 
 
 ACTIONS = {
+    "background_activate": Action(lambda owner, args: owner.activate_background(**args), worker=True),
     "register": Action(lambda owner, args: owner.register(args), locked=True),
     "plan": Action(lambda owner, args: owner.catalogs.plan(args)),
     "sync": Action(lambda owner, args: owner.catalogs.plan(args, download=True), worker=True),

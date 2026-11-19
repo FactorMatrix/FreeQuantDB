@@ -88,7 +88,7 @@ def test_dataset_queries_are_offline_and_share_selected_root(data_root):
     assert not (data_root / ".state/state/service.json").exists()
 
 
-def test_selected_root_persists_for_python_and_cli(data_root):
+def test_selected_root_is_shared_when_implicit_startup_is_disabled(data_root):
     root = data_root / "SYNTHETIC-selected"
     result = subprocess.run(
         [sys.executable, "-m", "fqdb", "init", "--data-dir", str(root)],
