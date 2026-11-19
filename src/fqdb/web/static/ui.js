@@ -34,6 +34,8 @@ export const names = {
   future: "期货",
   option: "期权",
   fund: "基金",
+  index: "指数",
+  constituents: "成分",
   base: "基础行情",
   financial: "财务",
   instrument: "证券资料",
@@ -43,6 +45,8 @@ export const names = {
 export const human = (value) => names[value] || value || "—";
 export const datasetName = (id) =>
   id ? id.split("/").map(human).join(" / ") : "—";
+export const datasetLabel = (row) =>
+  row.name && row.name !== row.dataset ? row.name : datasetName(row.dataset);
 export const packageKind = (entry) =>
   ({ day: "日包", month: "月包", year: "年包" })[entry?.period_kind || "day"] ||
   "数据包";
@@ -122,7 +126,7 @@ export const pill = (value, text = label(value)) =>
 export const button = (text, action, cls = "") =>
   `<button type="button" class="button ${cls}" data-action="${esc(action)}">${esc(text)}</button>`;
 export const empty = (title, note = "") =>
-  `<div class="empty-state"><span class="empty-glyph">▤</span><strong>${esc(title)}</strong>${note ? `<p>${esc(note)}</p>` : ""}</div>`;
+  `<div class="empty-state"><strong>${esc(title)}</strong>${note ? `<p>${esc(note)}</p>` : ""}</div>`;
 export const metric = (value, title, note = "") =>
   `<article class="metric-card"><span>${esc(title)}</span><strong>${esc(value)}</strong>${note ? `<small>${esc(note)}</small>` : ""}</article>`;
 export const jsonDetails = (value, title = "高级详情") =>

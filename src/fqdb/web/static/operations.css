@@ -1,0 +1,156 @@
+.ops-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.43fr);
+  align-items: start;
+  gap: 16px;
+}
+.ops-workspace > .panel {
+  min-width: 0;
+}
+.ops-download-scope {
+  margin-bottom: 14px;
+}
+.ops-download-scope .local-scope {
+  margin-bottom: 0;
+  max-width: 540px;
+}
+.ops-task-metrics.metric-grid,
+#provider-metrics.metric-grid {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  border-bottom: 1px solid var(--line);
+}
+.ops-task-metrics.metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+#provider-metrics.metric-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+#provider-metrics .metric-card {
+  border-bottom: 0;
+}
+.ops-task-metrics .metric-card,
+#provider-metrics .metric-card {
+  padding: 10px 16px;
+}
+.ops-task-filters.filter-bar {
+  border-bottom: 1px solid var(--line);
+}
+.ops-task-filters select,
+#audit-status {
+  width: auto;
+  max-width: 100%;
+}
+.ops-task-panel .empty-state {
+  padding: 28px 16px;
+}
+.ops-planner .segmented {
+  display: flex;
+  margin-bottom: 16px;
+}
+.ops-planner .segmented button {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  padding-inline: 8px;
+}
+.ops-planner #download-period label {
+  min-width: 112px;
+}
+.ops-planner #plan {
+  margin-top: 0;
+}
+.ops-download-preview > .metric-grid {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+}
+.ops-download-preview .plan-footer {
+  justify-content: flex-end;
+}
+.ops-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 1.35;
+}
+.ops-state .dot {
+  flex: none;
+  inline-size: 6px;
+  block-size: 6px;
+}
+.ops-task-panel .task-group > summary {
+  gap: 10px;
+  min-height: 54px;
+  padding: 9px 16px;
+  background: var(--card);
+}
+.ops-task-panel .task-group > summary:hover {
+  background: var(--hover);
+}
+.ops-group-period {
+  display: grid;
+  min-width: 120px;
+}
+.ops-group-period small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ops-group-states {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-left: auto;
+  font-size: 11px;
+}
+.ops-provision {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.ops-provider-state h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ops-provider-state p {
+  margin: 3px 0 0 14px;
+  font-size: 12px;
+}
+.ops-provider-limit small {
+  display: block;
+  margin-top: 6px;
+}
+.ops-ip-rules #provider-rules {
+  border-top: 1px solid var(--line);
+}
+.ops-audit #check-table td:nth-child(5) {
+  min-width: 150px;
+  max-width: 420px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1080px) {
+  .ops-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+}
+@media (max-width: 600px) {
+  .ops-task-metrics.metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ops-task-metrics .metric-card:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+  .ops-task-metrics .metric-card:nth-child(even) {
+    border-right: 0;
+  }
+  .ops-task-panel .task-group > summary {
+    flex-wrap: wrap;
+  }
+  .ops-group-states {
+    flex-basis: 100%;
+    margin-left: 14px;
+  }
+}

@@ -34,6 +34,10 @@ const noDownload = (r) =>
   r.magnet_status !== "available" || r.version_status === "current" || r.status === "downloading" ||
   ["waiting_peers", "waiting_metadata_peers"].includes(r.task?.status);
 const fileLabel = (r) => packagePeriod({ ...r, trading_date: r.period_kind === "day" ? r.start_date : null });
+const packageDateRange = ({ start_date: start, end_date: end }) => {
+  if (!start || !end) return "待核对";
+  return start === end ? start : `${start} — ${end}`;
+};
 const missingDates = (dates) => Array.isArray(dates) && dates.length
   ? `<p class="panel-note">缺失日期 · ${dates.map(esc).join("、")}</p>` : "";
 
@@ -44,7 +48,7 @@ export const packageColumns = [
   },
   {
     title: "日期范围",
-    render: (r) => `${esc(r.start_date || "待核对")} — ${esc(r.end_date || "待核对")}`,
+    render: (r) => esc(packageDateRange(r)),
   },
   { title: "行数", render: (r) => formatValue("rows", r.rows), n: true },
   { title: "标的", render: (r) => formatValue("instruments", r.instruments), n: true },

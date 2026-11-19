@@ -18,7 +18,25 @@ import {
   packageKind,
   packagePeriod,
   reasonText,
+  tone,
 } from "../ui.js";
+
+const workingStates = ["queued", "preparing", "fetching_metadata", "validating", "downloading", "checking", "moving", "retry_wait"];
+const waitingStates = ["waiting_metadata_peers", "waiting_peers"];
+const taskFilters = [
+  ...workingStates,
+  ...waitingStates,
+  "complete",
+  "failed",
+  "paused",
+  "cancelled",
+];
+const progress = (value) =>
+  `<div class="progress-cell"><progress max="1" value="${value}" aria-label="下载进度"></progress><span>${(value * 100).toFixed(0)}%</span></div>`;
+const taskLabel = (state) =>
+  ({ waiting_metadata_peers: "等待种子节点", waiting_peers: "等待数据节点" })[state] || label(state);
+const statusText = (state, text = taskLabel(state)) =>
+  `<span class="ops-state ${tone(state)}"><i class="dot" aria-hidden="true"></i>${esc(text)}</span>`;
 
 function taskActions(task) {
   const allowed = ["failed", "cancelled"].includes(task.status)
@@ -48,12 +66,8 @@ const taskTable = (tasks) =>
             : name;
         }
       },
-      { title: "状态", render: (r) => pill(r.status) },
-      {
-        title: "进度",
-        render: (r) =>
-          `<div class="progress-cell"><progress max="1" value="${r.progress}"></progress><span>${(r.progress * 100).toFixed(0)}%</span></div>`,
-      },
+      { title: "状态", render: (r) => statusText(r.status) },
+      { title: "进度", render: (r) => progress(r.progress) },
       {
         title: "下载 / 上传",
         render: (r) =>
@@ -110,21 +124,9 @@ export async function downloads(ctx) {
     month = preset?.month
       ? String(preset.month).padStart(2, "0")
       : end.slice(5, 7);
-  const plannerOpen = !!preset || ctx.state.downloadPlannerOpen;
-  const taskFilters = `<select id="task-status" aria-label="任务状态筛选">${options(
-    [
-      "queued",
-      "preparing",
-      "fetching_metadata",
-      "waiting_metadata_peers",
-      "validating",
-      "downloading",
-      "checking",
-      "waiting_peers",
-      "complete",
-      "failed",
-      "paused",
-    ].map((k) => [k, label(k)]),
+  const plannerOpen = !!preset || (ctx.state.downloadPlannerOpen ?? true);
+  const filters = `<select id="task-status" aria-label="任务状态筛选">${options(
+    taskFilters.map((k) => [k, taskLabel(k)]),
     ctx.state.taskStatus,
     "全部状态",
   )}</select><select id="task-group" aria-label="任务汇总方式">${options(
@@ -136,9 +138,18 @@ export async function downloads(ctx) {
     ctx.state.taskGroup || "month",
   )}</select>`;
   $("#view").innerHTML = `
-    ${scopeControls(ctx, "download")}
-    <section class="panel"><div class="panel-header"><h2>下载任务</h2><div class="action-row">${taskFilters}<button type="button" id="new-download" class="button button-primary">新建下载</button></div></div><div id="task-board"></div></section>
-    <details class="panel download-planner" id="download-planner" ${plannerOpen ? "open" : ""}><summary class="panel-header"><h2>新建下载</h2><span class="panel-meta">选择范围 → 预览 → 下载</span></summary><div class="panel-body">
+    <div class="ops-download-scope">${scopeControls(ctx, "download")}</div>
+    <section class="panel ops-download-preview" id="download-plan" aria-label="下载预览" hidden></section>
+    <div class="ops-workspace">
+      <section class="panel ops-task-panel" aria-labelledby="task-queue-title">
+        <div class="panel-header"><h2 id="task-queue-title" tabindex="-1">任务队列</h2><button type="button" id="new-download" class="button button-primary">新建下载</button></div>
+        <div class="metric-grid ops-task-metrics" id="task-metrics" aria-label="筛选范围内的任务统计"></div>
+        <div class="filter-bar ops-task-filters">${filters}</div>
+        <div id="task-board"></div>
+      </section>
+      <details class="panel download-planner ops-planner" id="download-planner" ${plannerOpen ? "open" : ""}>
+        <summary class="panel-header"><h2>下载范围</h2></summary>
+        <div class="panel-body">
     <div class="segmented" id="download-modes" aria-label="下载范围">${[
       ["day", "单日"],
       ["month", "整月"],
@@ -165,18 +176,18 @@ export async function downloads(ctx) {
             : `<label>开始日期<input name="start_date" type="date" value="${esc(range.start_date || "")}" required></label><label>结束日期<input name="end_date" type="date" value="${esc(end)}" required></label>`
     }
     <button class="button button-primary" id="plan" type="submit">预览计划</button></div></form>
-    <div id="download-plan"><p class="panel-note">按所选日期匹配已发布的数据包。</p></div></div></details>`;
+        </div>
+      </details>
+    </div>`;
   bindScope(ctx, "download");
   $("#plan").disabled = !ctx.selection().dataset;
   $("#download-planner").ontoggle = (e) => {
     ctx.state.downloadPlannerOpen = e.target.open;
   };
   $("#new-download").onclick = () => {
+    $("#download-plan").hidden = true;
     $("#download-planner").open = true;
-    $("#download-planner").scrollIntoView({
-      behavior: "smooth",
-      block: "start",
-    });
+    $("#download-form input, #download-form select").focus();
   };
   $$("[data-mode]")
     .filter((e) => e.tagName === "BUTTON")
@@ -232,12 +243,13 @@ export async function downloads(ctx) {
       });
     if (!ctx.live()) return;
     ctx.state.plan = { scope, data };
-    $("#download-plan").innerHTML = `
-      <section class="panel">
+    const previewPanel = $("#download-plan");
+    previewPanel.hidden = false;
+    previewPanel.innerHTML = `
         <div class="panel-header"><h2>下载预览</h2><span class="panel-meta">${num(data.total)} 个数据包</span></div>
         <div class="metric-grid metrics-four">
           ${metric(num(data.ready), "本地已就绪")}
-          ${metric(num(data.to_download), "待下载", `${num(data.revision)} 个新版本`)}
+          ${metric(num(data.to_download), "待下载", data.revision ? `${num(data.revision)} 个新版本` : "")}
           ${metric(bytes(data.bytes), "预计下载大小")}
           ${metric(num(data.no_magnet), "无磁力链接")}
         </div>
@@ -252,19 +264,30 @@ export async function downloads(ctx) {
           { title: "大小", render: (r) => bytes(r.package.size_bytes) },
         ], data.items, "本地目录中没有匹配的数据包。", "plan-table")}
         ${pager(data, "plan")}
-        <div class="plan-footer"><button class="button button-primary" id="sync" ${data.to_download ? "" : "disabled"}>执行下载 · ${num(data.to_download)} 个数据包</button></div>
-      </section>`;
-    $("#sync").onclick = () =>
+        <div class="plan-footer"><button class="button button-primary" id="sync" ${data.to_download ? "" : "disabled"}>执行下载 · ${num(data.to_download)} 个数据包</button></div>`;
+    if (offset === 0) previewPanel.scrollIntoView({ block: "nearest" });
+    $("#sync").onclick = (event) =>
       ctx.run(async () => {
+        const button = event.currentTarget;
         if (JSON.stringify(scope) !== JSON.stringify(selectedScope()))
           throw Error("范围已改变，请重新预览下载计划。");
-        const result = await ctx.act("sync", scope);
+        button.disabled = true;
+        let result;
+        try {
+          result = await ctx.act("sync", scope);
+        } catch (error) {
+          button.disabled = false;
+          throw error;
+        }
+        if (!ctx.live()) return;
         ctx.toast(
           result.task_ids.length
             ? `已安排 ${result.task_ids.length} 个文件任务`
             : "已有数据已就绪，无需重复下载",
         );
+        previewPanel.hidden = true;
         await ctx.updateTasks();
+        if (ctx.live()) $("#task-queue-title").focus();
       });
     bindPackages(ctx, $("#download-plan"));
     bindPager("plan", data, (offset) => ctx.run(() => preview(offset)));
@@ -279,11 +302,13 @@ export async function downloads(ctx) {
   $("#task-status").onchange = (e) => {
     ctx.state.taskStatus = e.target.value;
     ctx.state.taskOffset = 0;
+    ctx.state.taskGroupOffset = 0;
     ctx.run(() => ctx.updateTasks());
   };
   $("#task-group").onchange = (e) => {
     ctx.state.taskGroup = e.target.value;
     ctx.state.taskOffset = 0;
+    ctx.state.taskGroupOffset = 0;
     ctx.run(() => ctx.updateTasks());
   };
   ctx.updateTasks = async () => {
@@ -295,6 +320,12 @@ export async function downloads(ctx) {
     if (ctx.state.taskStatus) args.status = ctx.state.taskStatus;
     const data = await ctx.api("tasks", args);
     if (!ctx.live()) return;
+    const tally = (states) => states.reduce((total, state) => total + (data.counts[state] || 0), 0);
+    $("#task-metrics").innerHTML =
+      metric(num(tally(workingStates)), "进行中") +
+      metric(num(tally(waitingStates)), "等待节点") +
+      metric(num(data.counts.complete || 0), "已完成") +
+      metric(num(tally(["failed", "paused"])), "失败或暂停");
     const grouping = ctx.state.taskGroup || "month";
     if (grouping === "day") {
       $("#task-board").innerHTML = taskTable(data.items) + pager(data, "tasks");
@@ -342,16 +373,16 @@ export async function downloads(ctx) {
       ? shown
           .map(
             (g, i) =>
-              `<details class="task-group" data-task-group="${i}" ${ctx.state.openGroups?.includes(g.month) ? "open" : ""}><summary><strong>${esc(g.month.replace("-", " 年 ")) + (g.month.includes("-") ? " 月" : " 年")}</strong><span class="muted">${num(g.total)} 个文件任务 · ${bytes(g.size)}</span><div class="progress-cell"><progress max="1" value="${g.progress}"></progress><span>${(g.progress * 100).toFixed(0)}%</span></div><div class="chips">${Object.entries(
+              `<details class="task-group" data-task-group="${i}" ${ctx.state.openGroups?.includes(g.month) ? "open" : ""}><summary><span class="ops-group-period"><strong>${esc(g.month.replace("-", " 年 ")) + (g.month.includes("-") ? " 月" : " 年")}</strong><small>${num(g.total)} 个文件 · ${bytes(g.size)}</small></span>${progress(g.progress)}<span class="ops-group-states">${Object.entries(
                 g.counts,
               )
-                .map(([s, n]) => pill(s, `${label(s)} ${n}`))
+                .map(([s, n]) => statusText(s, `${taskLabel(s)} ${n}`))
                 .join(
                   "",
-                )}</div></summary><div class="group-days" data-group-days="${i}"></div></details>`,
+                )}</span></summary><div class="group-days" data-group-days="${i}"></div></details>`,
           )
           .join("") + pager(pageData, "task-groups")
-      : empty("暂无下载任务", "点击新建下载选择范围。");
+      : empty("暂无下载任务");
     bindPager("task-groups", pageData, (offset) => {
       ctx.state.taskGroupOffset = offset;
       ctx.run(() => ctx.updateTasks());

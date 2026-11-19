@@ -1,5 +1,19 @@
-import { $, esc, num, options, pager, bindPager, table } from "../ui.js";
+import { $, esc, options, pager, bindPager, table } from "../ui.js";
 import { bindPackages, packageColumns } from "../components/packages.js";
+
+const availability = {
+  available: ["good", "本地已有"],
+  missing: ["warn", "本地缺失"],
+  invalid: ["bad", "文件异常"],
+  new_version: ["warn", "本地有旧版本"],
+};
+const coverage = {
+  verified: ["good", "已核对"],
+  mismatch: ["bad", "有差异"],
+  error: ["bad", "核对失败"],
+};
+const evidenceState = (state = ["neutral", "待核对"]) =>
+  `<span class="ops-state ${state[0]}"><i class="dot" aria-hidden="true"></i>${state[1]}</span>`;
 
 export async function audit(ctx) {
   const args = { ...ctx.scope(), offset: ctx.state.auditOffset || 0, limit: 30 };
@@ -7,9 +21,9 @@ export async function audit(ctx) {
   const data = await ctx.api("audit", args);
   if (!ctx.live()) return;
   $("#view").innerHTML = `
-    <section class="panel">
-      <div class="panel-header"><h2>数据包核对</h2><span class="panel-meta">${num(data.total)} 个匹配包</span></div>
-      <div class="filter-bar">
+    <section class="panel ops-audit">
+      <div class="panel-header">
+        <h2>数据包核对</h2>
         <select id="audit-status" aria-label="包状态筛选">${options(
           ["anomaly", "pending", "missing", "revision", "no_peers", "local"].map((s) => [s, ctx.label(s)]),
           ctx.state.auditStatus, "全部状态",
@@ -17,9 +31,9 @@ export async function audit(ctx) {
       </div>
       ${table([
         ...packageColumns.slice(0, 2),
-        { title: "文件", render: (r) => esc({ available: "本地已有", missing: "本地缺失", invalid: "文件异常", new_version: "本地有旧版本" }[r.local_status] || "待核对") },
-        { title: "覆盖", render: (r) => esc({ verified: "已核对", mismatch: "有差异", error: "核对失败" }[r.coverage_status] || "待核对") },
-        { title: "问题", render: (r) => r.issues?.length ? esc(r.issues.map((i) => i.message || i.code).join("；")) : "—" },
+        { title: "本地文件", render: (r) => evidenceState(availability[r.local_status]) },
+        { title: "覆盖核对", render: (r) => evidenceState(coverage[r.coverage_status]) },
+        { title: "发现的问题", render: (r) => r.issues?.length ? esc(r.issues.map((i) => i.message || i.code).join("、")) : '<span class="muted">—</span>' },
         packageColumns.at(-1),
       ], data.items, "当前范围没有可核对的数据包。", "check-table")}
       ${pager(data, "audit")}

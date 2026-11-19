@@ -1,7 +1,7 @@
-import { $$, esc, num, bytes, pill, human } from "../ui.js";
+import { $$, esc, num, bytes, pill, human, datasetLabel } from "../ui.js";
 
 const dsLink = (row) =>
-  `<button class="text-link" data-open-dataset="${esc(row.dataset)}" data-frequency="${esc(row.frequency)}">${esc(row.name || row.dataset)}</button><span class="cell-sub">${esc(row.dataset)} · ${esc(human(row.frequency))}</span>`;
+  `<button class="text-link" type="button" data-open-dataset="${esc(row.dataset)}" data-frequency="${esc(row.frequency)}">${esc(datasetLabel(row))}</button><span class="cell-sub">${esc(row.dataset)} · ${esc(human(row.frequency))}</span>`;
 export const datasetCols = [
   { title: "数据集", render: dsLink },
   { title: "状态", render: (r) => pill(r.status) },

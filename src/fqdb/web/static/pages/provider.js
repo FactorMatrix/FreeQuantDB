@@ -29,24 +29,22 @@ export async function provider(ctx) {
   if (!ctx.live()) return;
   const view = $("#view");
   view.innerHTML = `
-    <section id="provider-status" class="status-hero">
-      <i class="dot"></i>
-      <div><strong id="provider-state"></strong><p id="provider-message"></p></div>
-      <div class="action-row"><button class="button" type="button" id="provider-toggle"></button></div>
-    </section>
-    <div class="metric-grid provider-metrics" id="provider-metrics"></div>
-    <div class="split provider-settings">
-      <section class="panel">
-        <div class="panel-header"><h2>上传限速</h2></div>
-        <div class="panel-body">
+    <div class="ops-workspace ops-provision">
+      <section class="panel" id="provider-status" aria-label="做种状态">
+        <div class="panel-header">
+          <div class="ops-provider-state"><h2><i class="dot" aria-hidden="true"></i><span id="provider-state"></span></h2><p id="provider-message" class="muted"></p></div>
+          <button class="button" type="button" id="provider-toggle"></button>
+        </div>
+        <div class="metric-grid" id="provider-metrics"></div>
+        <div class="panel-body ops-provider-limit">
           <form id="provider-limit" class="form-row">
-            <label>总上传上限（MB/s）<input name="limit" type="number" min="0" max="2147.483647" step="0.000001" required></label>
+            <label>总上传上限（MB/s）<input name="limit" type="number" min="0" max="2147.483647" step="0.000001" required aria-describedby="provider-limit-note"></label>
             <button class="button button-primary">保存限速</button>
           </form>
+          <small id="provider-limit-note" class="muted">0 表示不限速</small>
         </div>
-        <p class="panel-note">0 表示不限速。</p>
       </section>
-      <section class="panel">
+      <section class="panel ops-ip-rules">
         <div class="panel-header"><h2>IP 上传优先</h2></div>
         <div class="panel-body">
           <form id="provider-priority" class="form-row">
@@ -89,7 +87,8 @@ export async function provider(ctx) {
       ? current.upload_rate > 0 ? "下载任务仍可分享已下载的分片。" : ""
       : provisionStates[provision.status] || provision.message;
     message.hidden = !message.textContent;
-    $("#provider-status", view).className = `status-hero ${enabled ? "good" : "neutral"}`;
+    const indicator = $("#provider-status .dot", view);
+    indicator.className = `dot ${enabled ? "good" : "neutral"}`;
     $("#provider-metrics", view).innerHTML =
       metric(`${mb(current.upload_rate)} MB/s`, "当前总上传速度") +
       metric(num(provision.eligible), "可做种数据包");

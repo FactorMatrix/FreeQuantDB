@@ -1,12 +1,7 @@
-import { $ } from "../ui.js";
-
 export async function waitJob(ctx, id, paint = null) {
   for (;;) {
     const job = await ctx.act("job_status", { id });
     if (paint) paint(job);
-    const activity = $("#activity");
-    if (activity)
-      activity.textContent = `后台作业：${job.detail || job.status}`;
     if (job.status === "complete") return job.result;
     if (job.status === "paused")
       throw Error("此作业已中断，等待手动重新提交。");

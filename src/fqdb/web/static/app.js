@@ -32,11 +32,25 @@ let gatewaySession = new URLSearchParams(location.search).get("session"),
   gatewayClosed = false,
   gatewayConnection = null;
 
+$(".skip-link").onclick = (event) => {
+  event.preventDefault();
+  $("#title").focus();
+};
+
+function setConnection(message, online = false) {
+  const connection = $("#connection");
+  if (connection.textContent !== message) {
+    connection.textContent = message;
+    connection.title = message;
+  }
+  connection.classList.toggle("online", online);
+}
+
 function gatewayEnded() {
   gatewayClosed = true;
   gatewayConnection?.close();
   controller?.abort();
-  $("#connection").textContent = "管理界面已退出";
+  setConnection("管理界面已退出");
   $("#exit-gateway").disabled = true;
   $("#view").innerHTML = empty(
     "管理界面已退出",
@@ -128,8 +142,6 @@ function showError(error) {
       "所选标的没有可确认的本地记录，请核对代码、日期和覆盖信息。\n" + message;
   $("#error").hidden = false;
   $("#error").textContent = message;
-  $("#activity").textContent =
-    "操作未完成 · " + new Date().toLocaleTimeString("zh-CN");
 }
 async function run(fn) {
   state.busy++;
@@ -137,12 +149,11 @@ async function run(fn) {
   $("#activity").textContent = "正在处理…";
   try {
     await fn();
-    $("#activity").textContent =
-      "操作完成 · " + new Date().toLocaleTimeString("zh-CN");
   } catch (e) {
     showError(e);
   } finally {
     state.busy--;
+    if (!state.busy) $("#activity").textContent = "";
   }
 }
 function selection() {
@@ -212,17 +223,18 @@ function fillContext() {
   $("#end").value = state.end || "";
 }
 function paintRuntime(runtime) {
-  $("#connection").innerHTML = '<i class="dot"></i>本地服务在线';
+  setConnection("本地服务在线", true);
   const seeding = runtime.provider
     ? "做种已开启"
     : runtime.settings.auto_seed === false ? "做种已暂停" : "做种未开启";
-  $("#sidebar-provider").textContent = seeding;
-  $("#refresh-time").textContent = new Date().toLocaleTimeString("zh-CN", {
-    hour12: false,
-  });
-  if ($("#overview-runtime"))
-    $("#overview-runtime").innerHTML =
-      `${pill(runtime.provider ? "local" : "pending", seeding)}<span class="tag">↓ ${rate(runtime.download_rate)}</span><span class="tag">↑ ${rate(runtime.upload_rate)}</span><span class="tag">${num(runtime.peer_connections)} 个节点连接</span>`;
+  const transfer = $("#overview-runtime");
+  if (transfer) transfer.innerHTML = `
+    <div class="overview-transfer-mode">${pill(runtime.provider ? "local" : "pending", seeding)}</div>
+    <dl class="overview-transfer-rates">
+      <div><dt>下载</dt><dd>${rate(runtime.download_rate)}</dd></div>
+      <div><dt>上传</dt><dd>${rate(runtime.upload_rate)}</dd></div>
+      <div><dt>节点连接</dt><dd>${num(runtime.peer_connections)}</dd></div>
+    </dl>`;
 }
 function acceptSummary(data) {
   state.summary = data;
@@ -307,12 +319,13 @@ async function render() {
     )
     .join("");
   $("#title").textContent = route.title;
+  $("#refresh-magnets").hidden = !route.catalogAction;
   $(".page-heading").classList.toggle(
     "dataset-heading",
     state.page === "detail",
   );
   document.title = `${route.title} · FreeQuantDB`;
-  $("#context").hidden = !route.scope;
+  $("#context").hidden = !route.scope || (state.page === "detail" && state.detailTab === "coverage");
   $("#context").classList.toggle("scope-identity", route.scope === "identity");
   $("#heading-actions").innerHTML = route.headingAction
     ? `<button class="button" data-heading="datasets">${route.headingAction}</button>`
@@ -403,7 +416,7 @@ setInterval(async () => {
   try {
     await heartbeatGateway();
   } catch {
-    $("#connection").textContent = "服务连接中断";
+    setConnection("服务连接中断");
     return;
   }
   if (polling || state.busy || !current) return;
@@ -413,7 +426,7 @@ setInterval(async () => {
     paintRuntime(runtime);
     if (current.poll) await current.poll(runtime);
   } catch (e) {
-    if (e.name !== "AbortError") $("#connection").textContent = "服务连接中断";
+    if (e.name !== "AbortError") setConnection("服务连接中断");
   } finally {
     polling = false;
   }

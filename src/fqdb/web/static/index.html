@@ -5,41 +5,34 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>FreeQuantDB · 数据工作台</title>
     <link rel="stylesheet" href="/static/style.css" />
+    <link rel="stylesheet" href="/static/overview.css" />
+    <link rel="stylesheet" href="/static/catalog.css" />
+    <link rel="stylesheet" href="/static/operations.css" />
     <script type="module" src="/static/app.js"></script>
   </head>
   <body>
+    <a class="skip-link" href="#title">跳到页面内容</a>
     <div class="app-shell">
       <aside class="sidebar">
-        <a class="brand-lockup" href="#/overview"
-          ><span class="brand-mark">FQ</span><strong>FreeQuantDB</strong></a
-        >
+        <a class="brand-lockup" href="#/overview">
+          <span class="brand-mark" aria-hidden="true">FQ</span><strong>FreeQuantDB</strong>
+        </a>
         <nav aria-label="主导航">
-          <a href="#/overview" data-page="overview"
-            ><span class="nav-symbol">◫</span>概览</a
-          >
-          <a href="#/datasets" data-page="datasets"
-            ><span class="nav-symbol">▤</span>数据集</a
-          >
-          <a href="#/downloads" data-page="downloads"
-            ><span class="nav-symbol">↓</span>下载<span
-              id="nav-task-count"
-              class="nav-count"
-              hidden
-            ></span
-          ></a>
-          <a href="#/validation" data-page="validation"
-            ><span class="nav-symbol">✓</span>质量</a
-          >
-          <a href="#/provider" data-page="provider"
-            ><span class="nav-symbol">⇅</span>提供</a
-          >
-          <a href="#/settings" data-page="settings"
-            ><span class="nav-symbol">⚙</span>设置</a
-          >
+          <div class="nav-group">
+            <span class="nav-caption">数据</span>
+            <a href="#/overview" data-page="overview">概览</a>
+            <a href="#/datasets" data-page="datasets">数据集</a>
+            <a href="#/validation" data-page="validation">质量</a>
+          </div>
+          <div class="nav-group">
+            <span class="nav-caption">管理</span>
+            <a href="#/downloads" data-page="downloads">下载<span id="nav-task-count" class="nav-count" hidden></span></a>
+            <a href="#/provider" data-page="provider">做种</a>
+            <a href="#/settings" data-page="settings">设置</a>
+          </div>
         </nav>
         <div class="sidebar-bottom">
-          <div id="connection"><i class="dot"></i>连接服务中</div>
-          <span id="sidebar-provider">正在读取做种状态</span>
+          <div id="connection" class="connection-state" role="status">连接服务中</div>
           <button id="exit-gateway" class="button button-ghost" type="button">
             退出管理界面
           </button>
@@ -47,14 +40,11 @@
       </aside>
       <main class="page-main">
         <header class="page-heading">
-          <h1 id="title">概览</h1>
+          <h1 id="title" tabindex="-1">概览</h1>
           <div class="heading-tools">
-            <button id="refresh-magnets" class="button button-primary" type="button">更新磁力链接</button>
             <div id="heading-actions" class="action-row"></div>
-            <span id="refresh-time">尚未刷新</span
-            ><button id="refresh" class="button button-ghost" type="button">
-              重扫本地
-            </button>
+            <button id="refresh" class="button" type="button">刷新本地</button>
+            <button id="refresh-magnets" class="button button-primary" type="button" hidden>更新磁力链接</button>
           </div>
         </header>
         <nav
@@ -89,9 +79,7 @@
         <div id="view" aria-live="polite">
           <div class="empty-state">正在读取本地目录…</div>
         </div>
-        <footer>
-          <span id="activity">本地工作台</span><span>FreeQuantDB</span>
-        </footer>
+        <footer><span id="activity" role="status"></span></footer>
       </main>
     </div>
     <dialog id="package-detail" class="drawer" aria-label="数据包详情">

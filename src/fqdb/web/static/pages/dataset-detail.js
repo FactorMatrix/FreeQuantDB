@@ -1,10 +1,13 @@
 import {
-  $, $$, empty, esc, human, num, bytes, pill, metric, table, options, pager, bindPager,
+  $, $$, bindPager, bytes, datasetLabel, datasetName, empty, esc, human, metric, num, options, pager, pill, table,
 } from "../ui.js";
 import { bindPackages, packageColumns } from "../components/packages.js";
 import { query } from "./query.js";
 
-function treeMarkup(ctx, browse) {
+const statusKeys = ["local", "missing", "revision", "downloading", "no_peers", "anomaly", "pending"];
+const statusText = (ctx, status) => status === "no_peers" ? "等待节点" : ctx.label(status);
+
+function treeMarkup(ctx) {
   const tree = new Map();
   const selected = ctx.selection();
   for (const row of ctx.summary.datasets) {
@@ -22,12 +25,6 @@ function treeMarkup(ctx, browse) {
     });
     node.frequencies.push(row);
   }
-  const years = browse.years.map((year) => `
-    <details data-tree-level="year" ${String(ctx.state.year) === year ? "open" : ""}>
-      <summary data-year="${esc(year)}">${esc(year)} 年</summary>
-      ${browse.year_months[year].map((month) => `<button data-month="${esc(month)}" data-year="${esc(year)}" class="${ctx.state.month === month && ctx.state.year === year ? "selected" : ""}">${num(Number(month))} 月</button>`).join("")}
-    </details>
-  `).join("");
   function render(branch) {
     return [...branch.values()].map((node) => {
       const open = selected.dataset === node.path || selected.dataset.startsWith(node.path + "/");
@@ -36,7 +33,7 @@ function treeMarkup(ctx, browse) {
         ${render(node.children)}
         ${node.frequencies.map((row) => {
           const match = selected.dataset === row.dataset && selected.frequency === row.frequency;
-          return `<button data-tree-frequency="${esc(row.frequency)}" data-dataset="${esc(row.dataset)}" class="${match ? "selected" : ""}">${esc(human(row.frequency))}</button>${match && years ? `<div class="tree-years">${years}</div>` : ""}`;
+          return `<button type="button" data-tree-frequency="${esc(row.frequency)}" data-dataset="${esc(row.dataset)}" aria-current="${match}" class="${match ? "selected" : ""}">${esc(human(row.frequency))}</button>`;
         }).join("")}
       </details>`;
     }).join("");
@@ -44,7 +41,29 @@ function treeMarkup(ctx, browse) {
   return `<div class="tree-title">数据目录</div>${render(tree)}`;
 }
 
-async function distribution(ctx, target) {
+function dateRange(summary) {
+  if (!summary.start_date || !summary.end_date) return "暂无覆盖日期";
+  if (summary.start_date === summary.end_date) return summary.start_date;
+  return `${summary.start_date} 至 ${summary.end_date}`;
+}
+
+function monthButtons(year, month, years) {
+  const months = years[year] || [];
+  if (!months.length) return "";
+  return `<div class="catalog-months" role="group" aria-label="月份">${["", ...months].map((key) =>
+    `<button type="button" class="catalog-chip" data-month="${esc(key)}" aria-pressed="${(month || "") === key}">${key ? `${Number(key)} 月` : "全年"}</button>`,
+  ).join("")}</div>`;
+}
+
+function packageStatusBar(ctx, summary) {
+  const items = statusKeys.filter((status) => summary.counts[status]);
+  if (items.length < 2) return "";
+  return `<div class="catalog-package-stats" aria-label="数据集目录包状态">${items.map((status) =>
+    `<span><i class="catalog-marker ${status}" aria-hidden="true"></i>${statusText(ctx, status)}<b>${num(summary.counts[status])}</b></span>`,
+  ).join("")}</div>`;
+}
+
+async function distribution(ctx, target, summary) {
   const { year, month, catalogStatus, catalogOffset } = ctx.state;
   const browsing = await ctx.api("browse", {
     ...ctx.selection(), year, month, status: catalogStatus, limit: 30, offset: catalogOffset || 0,
@@ -52,22 +71,26 @@ async function distribution(ctx, target) {
   if (!ctx.live()) return;
   target.innerHTML = `
     <div class="catalog-layout">
-      <aside class="catalog-tree" aria-label="数据目录层级">${treeMarkup(ctx, browsing)}</aside>
-      <section class="panel">
-        <div class="panel-header">
-          <h2>数据包${year ? ` · ${esc(year)} 年` : ""}${month ? ` ${num(Number(month))} 月` : ""}</h2>
-          <button class="button" id="catalog-range-download">按范围下载</button>
+      <aside class="catalog-tree" aria-label="数据目录层级">${treeMarkup(ctx)}</aside>
+      <section class="panel catalog-packages">
+        <div class="panel-header catalog-package-heading">
+          <div><h2>数据包</h2><span class="panel-meta catalog-date">${esc(dateRange(summary))}</span></div>
+          <button type="button" class="button" id="catalog-range-download">预览下载</button>
         </div>
-        <div class="filter-bar">
-          <button class="button button-small" id="catalog-all">全部时期</button>
+        ${packageStatusBar(ctx, summary)}
+        <div class="catalog-toolbar catalog-period-toolbar">
+          <select id="catalog-year" aria-label="年份">${options(
+            browsing.years.map((value) => [value, `${value} 年`]), year, "全部年份",
+          )}</select>
+          ${monthButtons(year, month, browsing.year_months)}
           <select id="catalog-status" aria-label="包状态筛选">${options(
-            ["local", "missing", "revision", "downloading", "no_peers", "anomaly", "pending"].map((s) => [s, ctx.label(s)]),
+            statusKeys.map((s) => [s, statusText(ctx, s)]),
             catalogStatus, "全部状态",
           )}</select>
-          <span class="panel-meta">${num(browsing.total)} 个包</span>
+          <span class="panel-meta" id="catalog-count">${num(browsing.total)} 个数据包</span>
         </div>
-        ${table(packageColumns, browsing.items, "当前目录没有匹配的数据包。", "distribution-table")}
-        ${pager(browsing, "catalog")}
+        ${table(packageColumns, browsing.items, "没有匹配的数据包", "distribution-table")}
+        ${browsing.total > browsing.limit ? pager(browsing, "catalog") : ""}
       </section>
     </div>
   `;
@@ -82,25 +105,22 @@ async function distribution(ctx, target) {
       dataset: button.dataset.dataset, frequency: button.dataset.treeFrequency, tab: "coverage",
     })),
   );
-  $$("summary[data-year]", target).forEach((heading) =>
-    (heading.onclick = (event) => {
-      event.preventDefault();
-      selectPeriod(heading.dataset.year);
-    }),
-  );
+  $("#catalog-year", target).onchange = (event) => selectPeriod(event.target.value, null);
   $$("button[data-month]", target).forEach((button) =>
-    (button.onclick = () => selectPeriod(button.dataset.year, button.dataset.month)),
+    (button.onclick = () => selectPeriod(year, button.dataset.month)),
   );
-  $("#catalog-all").onclick = () => selectPeriod(null, null);
-  $("#catalog-status").onchange = (event) => {
+  $("#catalog-status", target).onchange = (event) => {
     ctx.state.catalogStatus = event.target.value;
     ctx.state.catalogOffset = 0;
     ctx.render();
   };
-  $("#catalog-range-download").onclick = () => {
-    if (year) ctx.state.downloadPreset = {
-      ...ctx.selection(), year: Number(year), ...(month ? { month: Number(month) } : {}),
+  $("#catalog-range-download", target).onclick = () => {
+    ctx.state.downloadPreset = {
+      ...ctx.selection(),
+      ...(year ? { year: Number(year) } : {}),
+      ...(month ? { month: Number(month) } : {}),
     };
+    ctx.state.plan = null;
     ctx.state.downloadPlannerOpen = true;
     ctx.navigate("downloads");
   };
@@ -116,16 +136,16 @@ export async function detail(ctx) {
   if (!ctx.live()) return;
   const { schema, summary } = data;
   const tab = ctx.state.detailTab || "coverage";
-  $("#title").textContent = summary.name || summary.dataset;
+  $("#title").textContent = datasetLabel(summary);
   $("#view").innerHTML = `
     <div class="dataset-identity">
-      <span class="code-id">${esc(summary.scope)}</span>${pill(summary.status)}
-      <span class="panel-meta">${esc(summary.start_date || "暂无日期")} — ${esc(summary.end_date || "暂无日期")}</span>
+      <span>${esc(datasetName(summary.dataset))} <span aria-hidden="true">·</span> ${esc(human(summary.frequency))}</span>
+      <span class="code-id">${esc(summary.scope)}</span>${pill(summary.status, statusText(ctx, summary.status))}
     </div>
-    <section class="metric-grid metrics-four">
-      ${metric(num(summary.published), "目录数据包", `${num(summary.local)} 个本地文件`)}
-      ${metric(num(summary.published_rows), "目录行情行数")}
-      ${metric(num(summary.published_instruments), "标的数", summary.published_instruments == null ? "单包统计见详情" : "")}
+    <section class="metric-grid metrics-four catalog-detail-metrics" aria-label="数据集关键指标">
+      ${metric(`${num(summary.local)} / ${num(summary.published)}`, "本地 / 目录数据包")}
+      ${metric(summary.latest_local || (summary.local ? "待核对" : "暂无数据"), "本地实测至")}
+      ${metric(summary.latest_published || "—", "目录覆盖至")}
       ${metric(bytes(summary.bytes), "本地体积")}
     </section>
     <section class="panel dataset-workbench">
@@ -145,6 +165,8 @@ export async function detail(ctx) {
   } else if (tab === "fields") {
     target.innerHTML = `
       <dl class="facts">
+        <div class="fact"><dt>目录行情行数</dt><dd>${num(summary.published_rows)}</dd></div>
+        <div class="fact"><dt>标的数</dt><dd>${summary.published_instruments == null ? "见单包" : num(summary.published_instruments)}</dd></div>
         <div class="fact"><dt>标的列</dt><dd>${esc(schema.instrument_column)}</dd></div>
         <div class="fact"><dt>时间列</dt><dd>${esc(schema.time_column)}</dd></div>
       </dl>
@@ -154,6 +176,6 @@ export async function detail(ctx) {
       ], Object.entries(schema.fields).map(([field, type]) => ({ field, type })))}
     `;
   } else {
-    await distribution(ctx, target);
+    await distribution(ctx, target, summary);
   }
 }
