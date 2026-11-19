@@ -116,6 +116,7 @@ def exercise(root, report):
     )
     fqdb.init(root)
     client = Client(root)
+    client.config.update(listen="127.0.0.1:0", discovery=False)
     gateway = None
     gateway_log = root / "SYNTHETIC-gateway.log"
     try:
@@ -179,11 +180,19 @@ def exercise(root, report):
             summary = browser.get(url + "/api/console/summary")
             summary.raise_for_status()
             require(
-                summary.json()["runtime"]["provider"] is False,
-                "Synthetic check unexpectedly enabled providing",
+                summary.json()["runtime"]["provider"] is True,
+                "Gateway did not enable automatic seeding",
             )
-        status = client.get("/api/status")
-        require(status["provider"] is False, "Publication enabled persistent seeding")
+        expected_seeds = {entry["info_hash"] for entry in published["entries"]}
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            status = client.get("/api/status")
+            ready = {transfer["id"] for transfer in status["transfers"] if transfer["seeding"]}
+            if ready == expected_seeds:
+                break
+            time.sleep(0.1)
+        else:
+            raise RuntimeError("Gateway did not restore the two synthetic seeds")
         report["checks"] = {
             "synthetic_daily_packages": len(published["entries"]),
             "deep_verified_files": checked.summary["file_verified"],
@@ -192,12 +201,17 @@ def exercise(root, report):
             "dashboard_status": index.status_code,
             "static_status": static.status_code,
             "console_summary_status": summary.status_code,
-            "provider": False,
+            "restored_seeds": len(ready),
         }
         session = re.search(r"[?&]session=([A-Za-z0-9_-]+)", gateway_log.read_text())
         require(session is not None, "Gateway did not print its session URL")
         client.call("gateway_close", {"session_id": session[1]})
         require(gateway.wait(timeout=15) == 0, "Foreground gateway did not exit normally")
+        require(client.endpoint() == endpoint, "Closing Gateway stopped the seed worker")
+        paused = client.call("provider_stop")
+        require(not paused["provider"] and not paused["settings"]["auto_seed"], "Pause was not saved")
+        require(not paused["transfers"], "Pause left native seeds running")
+        report["checks"]["seed_worker_survived_gateway"] = True
         deadline = time.monotonic() + 20
         while client.endpoint() and time.monotonic() < deadline:
             time.sleep(0.1)

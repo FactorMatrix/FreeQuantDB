@@ -28,11 +28,6 @@ jobs:
             native: source
           - python: '3.15'
             native: source
-    env:
-      FQDB_TEST_DATA_ROOT: ${{ runner.temp }}/fqdb-tests
-      FQDB_TEST_EVIDENCE_ROOT: ${{ runner.temp }}/fqdb-evidence
-      FQDB_WHEEL_DIR: ${{ runner.temp }}/fqdb-wheels
-      PIP_CACHE_DIR: ${{ runner.temp }}/fqdb-pip-cache
     steps:
       # Official v7 tags verified when adding this workflow; pin the actual code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -41,6 +36,14 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: ${{ matrix.python }}
+      - name: Set runner temporary directories
+        run: |
+          {
+            echo "FQDB_TEST_DATA_ROOT=$RUNNER_TEMP/fqdb-tests"
+            echo "FQDB_TEST_EVIDENCE_ROOT=$RUNNER_TEMP/fqdb-evidence"
+            echo "FQDB_WHEEL_DIR=$RUNNER_TEMP/fqdb-wheels"
+            echo "PIP_CACHE_DIR=$RUNNER_TEMP/fqdb-pip-cache"
+          } >> "$GITHUB_ENV"
       - name: Prepare build tools
         run: python -m pip install --upgrade pip setuptools wheel build
       - name: Prepare native compiler dependencies
