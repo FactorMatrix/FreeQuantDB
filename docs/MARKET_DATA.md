@@ -4,13 +4,19 @@ FreeQuantDB 管理符合约定的 Parquet 数据包。市场、资产、数据�
 
 ## 目录结构
 
+默认数据根目录是 `~/.fqdb`。运行 `fqdb gateway -d ~/fqdb_data` 可指定根目录并保存该路径。
+
+数据包相对于根目录的路径为 `data/<市场>/<资产>/<数据类型>/<频率>/<数据包相对路径>`。分包周期和文件名以各数据集的目录为准。
+
+以下是 A 股 2005 年日线包的目录示例。
+
 ```text
 catalog/cn/stock/base/1d/index.json
 catalog/cn/stock/base/1d/2005/2005.parquet.json
 data/cn/stock/base/1d/2005/2005.parquet
 ```
 
-数据集索引记录字段、标的列和时间列。包说明记录实际日期范围、行数、标的数、交易日数、字节数和磁力链接。手工维护的本地包可以省略磁力链接。年、月、日包分别使用 `YYYY.parquet`、`YYYYMM.parquet`、`YYYYMMDD.parquet`。
+数据集索引记录字段、标的列和时间列。包说明记录实际日期范围、行数、标的数、交易日数、字节数和磁力链接。手工维护的本地包可以省略磁力链接。
 
 ## 内置行情字段
 

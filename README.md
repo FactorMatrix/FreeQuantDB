@@ -1,58 +1,55 @@
 # FreeQuantDB
 
-`fqdb` 是可通过命令行、管理网页或 Python 使用的本地量化数据管理包，面向已符合约定的 Parquet 文件。
+FreeQuantDB 提供量化行情下载、订阅更新和本地查询。数据以 Parquet 保存，可用 Python 离线读取。
 
-## 安装
+## 快速上手
 
-需要 Python 3.11 或更高版本，以及 Git。
+需要 Python 3.11+ 和 Git。下面以下载 2005 年 A 股日线为例。
 
 ```bash
 python -m pip install git+https://github.com/FactorMatrix/FreeQuantDB.git
+fqdb catalog refresh
+fqdb download cn/stock/base --frequency 1d --year 2005
 ```
 
-## 启动
-
-```bash
-python -m fqdb gateway
-```
-
-`fqdb gateway` 打开管理网页。业务命令和 Python 的 `import fqdb` 也会启动或连接同一个传输后台。Python 导入时不打开网页。后台恢复本地可用数据的做种并检查已保存的订阅，之后默认每 3 小时检查磁力目录。
-
-在「传输 → 传输设置」选择数据集和频率后，可开启自动下载。仅更新磁力目录时可以留空。下载完成后会用原磁力继续做种。这里也可以暂停共享、设置下载和上传上限、添加优先 IP。
-
-关闭网页、终端或 Python 脚本后，后台会继续处理订阅、下载和共享。运行 `fqdb service stop` 结束后台。下次使用业务命令或在新 Python 进程中导入 `fqdb` 时会再次启动。
-
-下载数据分片时，整个后台不设总上传上限。回到纯做种时自动恢复保存的总上限，新安装默认 **500 KB/s（500,000 B/s）**。共享暂停和纯做种限速设置都会保留。
-
-## 数据目录
-
-CLI 的 `--data-dir` 或 `-d` 会保存所选目录，之后 CLI 和 Python 共用该选择。未保存目录时默认使用 `~/.fqdb`。
-
-```bash
-fqdb gateway -d ~/fqdb_data
-```
-
-如果从 Python 首次使用自定义目录，可以在导入前为进程设置 `FQDB_DATA_DIR`，也可以调用 `fqdb.init(data_dir)` 切换并保存目录。切换时，明确使用旧目录的后台会保留，正在处理的任务可继续完成，CLI 和 Python 会提示旧后台的状态。已登记的数据目录或挂载不可用时，恢复原挂载后再使用，或显式选择其他目录。
-
-## 帮助
-
-```bash
-python -m fqdb -h
-python -m fqdb gateway -h
-```
-
-其他命令同样支持 `-h` 或 `--help`。
-
-## Python
+下载完成后，用 Python 读取 2005 年第一个交易日的日线。
 
 ```python
 import fqdb
+
+df = fqdb.load("cn/stock/base", frequency="1d", start="2005-01-04", end="2005-01-04")
+print(df.head())
 ```
 
-可以用 `fqdb.provider.start()` 显式开启共享，或用 `fqdb.provider.stop()` 暂停。只需离线读取时，在导入前设置 `FQDB_AUTOSTART=0`。
+也可以运行 `fqdb gateway` 打开网页，点击「更新磁力链接」，在「数据集」中选择数据包下载，并在数据集详情的「行情查询」中预览行情。
+
+## 自动更新
+
+订阅默认每 3 小时检查一次磁力目录。仅同步目录时，数据集可留空。
+
+在网页的「传输 → 传输设置」选择数据集和频率，勾选「自动下载新数据包」，点击「保存订阅」。留空日期可跟进新包和修订，指定日期可补齐该范围内已发布的数据。已有的相同数据会跳过。
+
+也可以用命令行订阅 A 股日线。
+
+```bash
+fqdb subscribe cn/stock/base --frequency 1d --download
+```
+
+## 数据列表
+
+| 数据 | 数据集 | 频率 | 已上线范围 | 状态 | 预计上线时间 |
+| --- | --- | --- | --- | --- | --- |
+| A 股基础行情 | `cn/stock/base` | 日线 `1d` | 2005-01-04 至 2025-12-31 | 已上线，其他年份待发布 | |
+| A 股基础行情 | `cn/stock/base` | 分钟 `1m` |  | 待上线 | |
+| ETF 基础行情 | `cn/etf/base` | 日线 `1d` |  | 待上线 | |
+| ETF 基础行情 | `cn/etf/base` | 分钟 `1m` |  | 待上线 | |
+| 国内期货基础行情 | `cn/future/base` | 日线 `1d` |  | 待上线 | |
+| 国内期货基础行情 | `cn/future/base` | 分钟 `1m` |  | 待上线 | |
+
+A 股日线已发布 2005–2025 年的 21 个年包，共 15,368,408 行。最新可下载范围见[数据下载目录](catalog/README.md)。
 
 ## 文档与许可
 
-[数据下载](catalog/README.md) · [管理网页](docs/DASHBOARD.md) · [数据说明](docs/MARKET_DATA.md) · [Python 与开发环境](docs/PYTHON_SUPPORT.md)
+[管理网页](docs/DASHBOARD.md) · [数据格式与目录](docs/MARKET_DATA.md) · [Python 与开发环境](docs/PYTHON_SUPPORT.md) · [架构](docs/ARCHITECTURE.md)
 
 软件采用 [Apache-2.0](LICENSE) 许可。
