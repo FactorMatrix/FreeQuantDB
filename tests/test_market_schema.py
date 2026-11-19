@@ -100,6 +100,9 @@ def test_market_registry_isolates_paths_catalog_and_queries(data_root, monkeypat
         ("510300.SH", "etf"),
         ("RB2701.SHFE", "future"),
         ("I2701.DCE", "future"),
+        ("L2701F.DCE", "future"),
+        ("PP2702F.DCE", "future"),
+        ("V2712F.DCE", "future"),
         ("TA2701.CZCE", "future"),
         ("IF2701.CFFEX", "future"),
         ("SC2701.INE", "future"),
@@ -122,6 +125,9 @@ def test_explicit_instrument_suffixes(value, asset):
         ("RB2700.SHFE", "future"),
         ("RB2701", "future"),
         ("rb2701.SHFE", "future"),
+        ("L2701F.SHFE", "future"),
+        ("I2701F.DCE", "future"),
+        ("L2713F.DCE", "future"),
     ],
 )
 def test_unknown_or_ambiguous_instruments_are_not_guessed(value, asset):

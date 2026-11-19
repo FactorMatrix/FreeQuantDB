@@ -27,6 +27,8 @@ data/cn/stock/base/1d/2005/2005.parquet
 
 `instrument` 是字符串，`trading_date` 是日期，`trading_time` 含时区，量价字段是双精度数值。SDK 按本地数据离线查询。缺少可信交易日证据时，跨夜记录的所属交易日显示为待核对。
 
+期货 `instrument` 包含合约代码和交易所后缀。大商所 `L`、`PP` 和 `V` 的月均价合约保留代码中的 `F`，例如 `L2602F.DCE`。
+
 ## 下载与核对
 
 官方磁力说明可同步到本机，也可从同结构的镜像或本地文件导入。下载完成采用 BitTorrent 分片校验结果。包说明和实际文件可在看板中核对，或用 `fqdb catalog check` 比较预期与实测值。[数据下载](../catalog/README.md)

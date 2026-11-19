@@ -1,0 +1,9 @@
+{
+  "start_date": "2013-01-04",
+  "end_date": "2013-12-31",
+  "rows": 15613,
+  "instruments": 81,
+  "trading_days": 238,
+  "size_bytes": 1322311,
+  "magnet": "magnet:?xt=urn:btih:2b2139506a637b321f1e6ed01b933563aa507491&dn=2013.parquet"
+}

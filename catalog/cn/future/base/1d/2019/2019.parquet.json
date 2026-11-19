@@ -1,0 +1,9 @@
+{
+  "start_date": "2019-01-02",
+  "end_date": "2019-12-31",
+  "rows": 136516,
+  "instruments": 1165,
+  "trading_days": 244,
+  "size_bytes": 4242162,
+  "magnet": "magnet:?xt=urn:btih:a04c0551dd56217fcfd19c7fe099518f1e1bdcf7&dn=2019.parquet"
+}

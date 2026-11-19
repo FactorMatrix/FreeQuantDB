@@ -1,6 +1,6 @@
 """Registered markets and their asset, exchange, symbol and unit rules."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 
 from ..util import FQDBError
@@ -18,6 +18,7 @@ class AssetContract:
     volume_units: tuple[str, ...]
     price_units: tuple[str, ...]
     data_types: tuple[str, ...] = ("base",)
+    exchange_patterns: dict[str, re.Pattern[str]] = field(default_factory=dict)
 
     @property
     def volume_unit(self):
@@ -25,7 +26,8 @@ class AssetContract:
 
     def accepts_symbol(self, value):
         symbol, separator, exchange = value.rpartition(".")
-        return bool(separator and exchange in self.exchanges and self.symbol_pattern.fullmatch(symbol))
+        pattern = self.exchange_patterns.get(exchange, self.symbol_pattern)
+        return bool(separator and exchange in self.exchanges and pattern.fullmatch(symbol))
 
 
 @dataclass(frozen=True)
@@ -36,6 +38,9 @@ class MarketContract:
 
 
 _SECURITY_CODE = re.compile(r"[0-9]{6}")
+_DELIVERY_MONTH = r"[0-9]{2}(?:0[1-9]|1[0-2])"
+_FUTURE_CODE = re.compile(rf"[A-Z]+{_DELIVERY_MONTH}")
+_DCE_FUTURE_CODE = re.compile(rf"{_FUTURE_CODE.pattern}|(?:L|PP|V){_DELIVERY_MONTH}F")
 _SHARE_UNITS = ("shares", "股")
 _CNY = ("CNY", "元")
 MARKET_CONTRACTS = {
@@ -47,9 +52,10 @@ MARKET_CONTRACTS = {
             "etf": AssetContract(("SZ", "SH"), _SECURITY_CODE, _SHARE_UNITS, _CNY),
             "future": AssetContract(
                 ("SHFE", "DCE", "CZCE", "CFFEX", "INE", "GFEX"),
-                re.compile(r"[A-Z]+[0-9]{2}(?:0[1-9]|1[0-2])"),
+                _FUTURE_CODE,
                 ("contracts", "lots", "手", "张"),
                 (*_CNY, "points", "点"),
+                exchange_patterns={"DCE": _DCE_FUTURE_CODE},
             ),
         },
     ),
