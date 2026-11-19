@@ -278,6 +278,7 @@ class Owner:
                 else None,
                 "transfers": self.transfer_status(),
                 "settings": self.config.read(),
+                **self.upload_policy_status(),
                 "last_error": self.last_error,
                 "datasets": self.store.datasets(),
                 "tasks": [self.transfers.task_state(task) for task in self.store.tasks()],
@@ -286,3 +287,7 @@ class Owner:
                 "local": [e.to_dict() for e, _ in self.store.active()],
                 "published": [e.to_dict() for e in self.store.entries()],
             }
+
+    def upload_policy_status(self):
+        with self.lock:
+            return self.peers.upload_policy_status()

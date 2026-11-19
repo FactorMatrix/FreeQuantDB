@@ -34,6 +34,7 @@ class Transfers:
     def __init__(self, owner):
         self.owner, self.store, self.config, self.lock = owner, owner.store, owner.config, owner.lock
         self._authorized = set()
+        self._receiving = set()
         self.started = {}
         self.preparation_jobs = {}
         self.last_peer_connect = 0
@@ -80,6 +81,10 @@ class Transfers:
             return False
         task = self.store.task(identity)
         return task is not None and task["status"] in WORK_STATES
+
+    @property
+    def receiving(self):
+        return bool(self._receiving)
 
     def begin(self, task):
         identity, body = task["id"], task["body"]
@@ -161,8 +166,12 @@ class Transfers:
 
     def tick(self, cfg):
         self._start_ready(cfg)
-        for identity, handle in list(self.owner.engine.handles.items()):
-            self._update_handle(identity, handle, cfg)
+        self._receiving = {
+            identity
+            for identity, handle in list(self.owner.engine.handles.items())
+            if self._update_handle(identity, handle, cfg)
+        }
+        self.owner.peers.apply_upload_limit(cfg["upload_limit"])
         if time.monotonic() - self.last_peer_connect >= 1:
             self.owner.engine.connect(
                 [(node["ip"], node["port"]) for node in cfg["peer_nodes"] if node["enabled"]]
@@ -270,6 +279,15 @@ class Transfers:
             self.store.set_task(
                 identity, status=state, reason="no_available_peers" if state == "waiting_peers" else None
             )
+            return (
+                identity in self._authorized
+                and s.state == lt.torrent_status.downloading
+                and s.num_peers > 0
+                and (
+                    s.download_payload_rate > 0
+                    or s.total_payload_download > task["metrics"].get("downloaded", 0)
+                )
+            )
 
     def control(self, identity, operation):
         if not self.store.task(identity):
@@ -289,6 +307,9 @@ class Transfers:
             self.store.set_task(identity, status="queued", attempts=0, reason=None)
         else:
             raise FQDBError("Unknown task operation")
+        self._receiving.discard(identity)
+        if engine is not None:
+            self.owner.peers.apply_upload_limit(self.config.read()["upload_limit"])
         self.preparation_jobs.pop(identity, None)
         return self.store.task(identity)
 

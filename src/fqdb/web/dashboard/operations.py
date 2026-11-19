@@ -40,6 +40,7 @@ class OperationViews:
                 "transfers": transfers,
                 "download_rate": sum(t["download_rate"] for t in transfers),
                 "upload_rate": sum(t["upload_rate"] for t in transfers),
+                **self.owner.upload_policy_status(),
                 "peer_connections": sum(t["peers"] for t in transfers),
                 "data_dir": str(self.store.root),
                 "last_error": self.owner.last_error,

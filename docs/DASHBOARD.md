@@ -43,7 +43,14 @@ fqdb -d /path/to/fqdb-data provider status
 fqdb -d /path/to/fqdb-data provider stop
 ```
 
-新安装默认总上传上限为 500 KB/s（500,000 B/s）。已保存的限速继续使用。网页使用 MB/s，500 KB/s 显示为 0.5 MB/s。`provider start --upload-limit` 使用 B/s。`0` 表示不限速。
+传输页分别显示当前总上传上限和保存的纯做种上限。
+
+| 传输状态 | 总上传上限 |
+| --- | --- |
+| 正在接收下载分片 | 不限速，包括同一后台正在上传的旧种子 |
+| 没有下载分片传输 | 恢复保存的纯做种上限，新安装默认 500 KB/s（500,000 B/s） |
+
+网页使用 MB/s，500 KB/s 显示为 0.5 MB/s。`provider start --upload-limit` 使用 B/s。将纯做种上限设为 `0` 时，纯做种也不限速。
 
 新安装默认启用 DHT、PEX 等节点发现，并在本机 IPv4 网络接口上监听 BT。已有监听地址和发现设置继续生效，管理网页默认只监听 `127.0.0.1`。公网可达性取决于 NAT、端口和对端在线情况。局域网也可通过 `fqdb peers add NODE_IP NODE_PORT` 添加已知节点。
 
@@ -53,4 +60,4 @@ fqdb -d /path/to/fqdb-data provider priority list
 fqdb -d /path/to/fqdb-data provider priority remove 192.0.2.10
 ```
 
-将示例地址换成接收方的 IPv4 或 IPv6。设置总上传限速后，规则在目标节点重连时生效。多个节点争用带宽时，libtorrent 会优先给指定 IP 分配可用带宽。所有节点共用总上传上限，优先级没有固定速度或比例。
+将示例地址换成接收方的 IPv4 或 IPv6。IP 规则变更在目标节点重连时生效。纯做种限速下，多个节点争用带宽时，libtorrent 会优先给指定 IP 分配可用带宽。下载期间解除总上限后，优先 IP 的效果可能不明显，实际速度取决于可用带宽。

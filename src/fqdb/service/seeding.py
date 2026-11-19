@@ -389,7 +389,7 @@ class Seeding:
                 if prepared["eligible"]:
                     if parent_pid is None:
                         self.config.update(auto_seed=True)
-                    self.owner.engine.session.apply_settings({"upload_rate_limit": limit})
+                    self.owner.peers.apply_upload_limit(limit)
                     self.owner.peers.apply_priority()
                     self.enabled = True
                     self.parent_pid = parent_pid

@@ -39,10 +39,11 @@ export async function mountTransferSettings(ctx, view) {
         <div class="panel-body ops-provider-limit">
           <form id="provider-limit" class="form-row">
             <label>总下载上限（MB/s）<input name="download_limit" type="number" min="0" max="2147.483647" step="0.000001" required aria-describedby="provider-limit-note"></label>
-            <label>总上传上限（MB/s）<input name="limit" type="number" min="0" max="2147.483647" step="0.000001" required aria-describedby="provider-limit-note"></label>
+            <label>纯做种总上传上限（MB/s）<input name="limit" type="number" min="0" max="2147.483647" step="0.000001" required aria-describedby="provider-limit-note"></label>
             <button class="button button-primary">保存限速</button>
           </form>
           <small id="provider-limit-note" class="muted">0 表示不限速</small>
+          <small>当前总上传上限 <strong id="effective-upload-limit"></strong></small>
         </div>
       </section>
       <section class="panel ops-ip-rules">
@@ -105,6 +106,11 @@ export async function mountTransferSettings(ctx, view) {
       limitInput.value = mb(settings.upload_limit);
       downloadInput.value = mb(settings.download_limit);
     }
+    const downloading = current.upload_limit_mode === "downloading";
+    const uploadLimit = current.effective_upload_limit;
+    $("#effective-upload-limit", view).textContent = downloading
+      ? "不限速（下载中）"
+      : uploadLimit === 0 ? "不限速" : `${mb(uploadLimit)} MB/s`;
 
     const rulesContent = table(
       [
@@ -123,9 +129,10 @@ export async function mountTransferSettings(ctx, view) {
       rules.innerHTML = rulesContent;
       lastRules = rulesContent;
     }
-    $("#priority-note", view).textContent = settings.upload_limit === 0
-      ? "设置上传总限速后，优先级参与带宽分配。规则变更在节点重连后生效。"
-      : "规则变更在节点重连后生效。";
+    const priorityNote = downloading
+      ? "下载期间，IP 优先效果可能不明显。"
+      : uploadLimit === 0 ? "设置上传总限速后，优先级参与带宽分配。" : "";
+    $("#priority-note", view).textContent = priorityNote + "规则变更在节点重连后生效。";
 
     const issues = [...provision.issues, ...current.provider_issues];
     const uniqueIssues = [...new Map(issues.map((issue) => [

@@ -57,18 +57,22 @@ def build(client, *, missing_file=False):
 
 def configure_limits(page, client):
     form = page.locator("#provider-limit")
-    limit = form.get_by_label("总上传上限（MB/s）")
+    limit = form.get_by_label("纯做种总上传上限（MB/s）", exact=True)
     download = form.get_by_label("总下载上限（MB/s）")
+    effective_upload_limit = page.locator("#effective-upload-limit")
     expect(limit).to_have_value("2.5")
     expect(download).to_have_value("0")
+    expect(effective_upload_limit).to_have_text("2.5 MB/s")
     limit.fill("0")
     form.get_by_role("button", name="保存限速").click()
+    expect(effective_upload_limit).to_have_text("不限速")
     expect(page.locator("#priority-note")).to_contain_text("设置上传总限速后")
     assert client.call("priority_list")["global_upload_limit"] == 0
 
     limit.fill("1.234567")
     download.fill("3.5")
     form.get_by_role("button", name="保存限速").click()
+    expect(effective_upload_limit).to_have_text("1.234567 MB/s")
     expect(page.locator("#priority-note")).not_to_contain_text("设置上传总限速后")
     assert client.config.read()["upload_limit"] == 1_234_567
     assert client.config.read()["download_limit"] == 3_500_000

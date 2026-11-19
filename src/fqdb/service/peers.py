@@ -9,6 +9,23 @@ class PeerSettings:
         self.owner = owner
         self.config = owner.config
         self._priority = None
+        self._applied_upload_limit = None
+
+    def apply_upload_limit(self, seed_limit):
+        """Apply the session-wide upload cap when the transfer mode changes."""
+        effective_limit = 0 if self.owner.transfers.receiving else seed_limit
+        if effective_limit != self._applied_upload_limit:
+            self.owner.engine.session.apply_settings({"upload_rate_limit": effective_limit})
+            self._applied_upload_limit = effective_limit
+
+    def upload_policy_status(self):
+        effective_limit = self._applied_upload_limit
+        if effective_limit is None:
+            effective_limit = self.config.read()["upload_limit"]
+        return {
+            "effective_upload_limit": effective_limit,
+            "upload_limit_mode": "downloading" if self.owner.transfers.receiving else "seeding",
+        }
 
     @property
     def priority(self):
@@ -137,8 +154,8 @@ class PeerSettings:
             raise FQDBError("Stop active BitTorrent work before changing listen or discovery")
         result = self.config.update(**args)
         if engine is not None:
+            self.apply_upload_limit(result["upload_limit"])
             native = {
-                "upload_rate_limit": result["upload_limit"],
                 "download_rate_limit": result["download_limit"],
                 "connections_limit": result["connections_limit"],
             }

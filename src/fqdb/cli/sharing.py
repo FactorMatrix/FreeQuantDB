@@ -81,7 +81,7 @@ def register(cli):
     provision.add_argument(
         "--upload-limit",
         type=int,
-        help=f"Upload rate in bytes per second (default {DEFAULT_UPLOAD_LIMIT:,}). Use 0 for unlimited.",
+        help=f"Total seeding-only upload cap in bytes per second (default {DEFAULT_UPLOAD_LIMIT:,}). Use 0 for unlimited.",
     )
     provision.add_argument("--start-date")
     provision.add_argument("--end-date")
